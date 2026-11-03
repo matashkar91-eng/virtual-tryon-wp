@@ -56,6 +56,11 @@ final class Settings {
         ));
     }
 
+    public static function valid_model(string $model): bool {
+        return strlen($model) <= 160
+            && preg_match('~\A[A-Za-z0-9][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*){0,4}\z~', $model) === 1;
+    }
+
     public static function sanitize($input) {
         $old = self::get();
         if (!current_user_can('manage_options') || !is_array($input)) {
@@ -92,11 +97,11 @@ final class Settings {
         $out['global_rate_limit'] = max(1, min(1000, absint(isset($input['global_rate_limit']) ? $input['global_rate_limit'] : $old['global_rate_limit'])));
         $out['retention_hours'] = max(1, min(168, absint(isset($input['retention_hours']) ? $input['retention_hours'] : $old['retention_hours'])));
         $model = isset($input['model']) && is_scalar($input['model']) ? trim($input['model']) : $old['model'];
-        if (preg_match('#^[a-zA-Z0-9_-]+(?:/[a-zA-Z0-9_.-]+){0,4}$#D', $model)) {
+        if (self::valid_model($model)) {
             $out['model'] = $model;
         } else {
             $out['model'] = $old['model'];
-            add_settings_error(self::OPTION, 'vto_model', 'شناسهٔ مدل معتبر نیست. شناسهٔ مدل را بدون آدرس وب وارد کنید.');
+            add_settings_error(self::OPTION, 'vto_model', 'شناسهٔ مدل معتبر نیست. فقط نام مدل، مانند gpt-image-2.5-flare، را بدون آدرس وب و فاصله وارد کنید (حداکثر ۱۶۰ نویسه).');
         }
         // A blank field preserves the saved credential; clearing is explicit.
         $out['api_key'] = $old['api_key'];

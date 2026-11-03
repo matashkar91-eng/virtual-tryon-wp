@@ -121,6 +121,11 @@ try {
     check(is_wp_error($unsafe) && $unsafe->get_error_code() === 'vto_product_image', 'Private-network product URL cannot be used for server-side requests');
     $bad_model = $live_row; $bad_model['model'] = 'invalid model?';
     check(is_wp_error(VTO\Provider::generate($bad_model)), 'Malformed model identifier is rejected before sending photos');
+    foreach (['https://example.com/model', 'provider//model', str_repeat('a',161)] as $model) {
+        $bad_model['model'] = $model;
+        $invalid_model = VTO\Provider::generate($bad_model);
+        check(is_wp_error($invalid_model) && $invalid_model->get_error_code() === 'vto_provider_model', 'Queue provider enforces the same model identifier rules as settings');
+    }
     remove_filter('pre_http_request', $http_filter, 10);
     $http_filter = function($pre, $args, $url) {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
@@ -161,6 +166,23 @@ try {
     check($sanitized['accent_color'] === $settings['accent_color'], 'Invalid CSS color cannot be persisted');
     $sanitized = VTO\Settings::sanitize(['clear_api_key'=>1]);
     check($sanitized['api_key'] === '', 'API credential deletion requires explicit clear');
+    $model_baseline = $settings;
+    $model_baseline['model'] = 'baseline-image-model';
+    update_option('vto_settings', $model_baseline, false);
+    foreach (['gpt-image-2.5-flare', 'openai/gpt-image-2.5-flare', 'provider/image-model:v2.5'] as $model) {
+        $sanitized = VTO\Settings::sanitize(['model'=>$model]);
+        check($sanitized['model'] === $model, 'Settings accept versioned image model '.$model);
+    }
+    foreach (['https://example.com/model', 'invalid model', "model\r\nInjected: header", str_repeat('a',161)] as $model) {
+        $sanitized = VTO\Settings::sanitize(['model'=>$model]);
+        check($sanitized['model'] === $model_baseline['model'], 'Malformed or oversized model preserves previous setting');
+    }
+    $save_input = $model_baseline;
+    $save_input['model'] = 'gpt-image-2.5-flare';
+    $save_input['api_key'] = '';
+    update_option('vto_settings', VTO\Settings::sanitize($save_input), false);
+    $saved_model_settings = VTO\Settings::get();
+    check($saved_model_settings['model'] === 'gpt-image-2.5-flare' && $saved_model_settings['api_key'] === $model_baseline['api_key'], 'Saving dotted model round-trips through WordPress without clearing API key');
     echo "\n$passed assertions passed. Live provider calls were mocked; no paid API request was made.\n";
 } catch (Throwable $error) {
     fwrite(STDERR, 'FAIL '.$error->getMessage()."\n");

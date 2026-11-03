@@ -41,7 +41,7 @@ final class Provider {
             return self::error('vto_provider_key', 'سرویس پردازش فروشگاه هنوز آماده نیست. لطفاً با پشتیبانی تماس بگیرید.', 'Missing or invalid AvalAI API key.');
         }
         $model = isset($job['model']) ? trim((string) $job['model']) : (isset($settings['model']) ? trim((string) $settings['model']) : '');
-        if ('' === $model || strlen($model) > 160 || !preg_match('~^[a-zA-Z0-9_./:-]+$~', $model)) {
+        if (!Settings::valid_model($model)) {
             return self::error('vto_provider_model', 'مدل پردازش فروشگاه هنوز تنظیم نشده است.', 'An image-edit-capable AvalAI model is required.');
         }
         $product = self::product_image($job);

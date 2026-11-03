@@ -92,23 +92,12 @@ final class Provider {
         if (strlen($raw) >= self::MAX_RESPONSE_BYTES) {
             return self::error('vto_provider_response_size', 'حجم پاسخ سرویس بیش از حد مجاز بود. لطفاً با پشتیبانی تماس بگیرید.', 'AvalAI response exceeded the configured maximum.');
         }
-        $data = json_decode($raw, true);
-        unset($raw);
         if ($status < 200 || $status > 299) {
+            $data = json_decode($raw, true, 64);
             return self::http_error($status, $data);
         }
-        if (!is_array($data) || empty($data['data'][0]['b64_json']) || !is_string($data['data'][0]['b64_json'])) {
-            return self::error('vto_provider_format', 'سرویس تصویر قابل استفاده‌ای برنگرداند. پشتیبانی فروشگاه باید تنظیمات مدل را بررسی کند.', 'AvalAI did not return data[0].b64_json. Confirm that this model supports the OpenAI-compatible multi-image edits endpoint.');
-        }
-        $bytes = base64_decode($data['data'][0]['b64_json'], true);
-        if (false === $bytes) {
-            return self::error('vto_provider_image', 'تصویر خروجی سرویس قابل خواندن نیست.', 'Invalid base64 image in AvalAI response.');
-        }
-        $image = self::validate_image($bytes);
-        if (is_wp_error($image)) {
-            return self::error('vto_provider_image', 'تصویر خروجی سرویس قابل خواندن نیست.', 'AvalAI response failed image MIME, dimensions or size validation.');
-        }
-        return $image;
+        unset($raw);
+        return Provider_Result::decode($response, $job);
     }
 
     /**

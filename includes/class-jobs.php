@@ -25,10 +25,12 @@ final class Jobs {
             prompt text NOT NULL,
             input_path text NOT NULL,
             output_path text NOT NULL,
+            reference_path text NULL,
             error_code varchar(100) NOT NULL DEFAULT '',
             error_message text NOT NULL,
             error_detail text NOT NULL,
             attempts int unsigned NOT NULL DEFAULT 0,
+            recovery_attempts int unsigned NOT NULL DEFAULT 0,
             created_at datetime NOT NULL,
             updated_at datetime NOT NULL,
             expires_at datetime NOT NULL,
@@ -100,7 +102,7 @@ final class Jobs {
             'product_image' => $product['image'], 'product_image_id' => $product['image_id'],
             'category' => $product['category'], 'mode' => $settings['mode'], 'model' => $settings['model'],
             'prompt' => strtr($settings['prompt'], ['{product}' => $product['name'], '{category}' => $product['category']]),
-            'input_path' => $input, 'output_path' => '', 'error_message' => '', 'error_detail' => '',
+            'input_path' => $input, 'output_path' => '', 'reference_path' => '', 'error_message' => '', 'error_detail' => '',
             'created_at' => $now, 'updated_at' => $now,
             'expires_at' => gmdate('Y-m-d H:i:s', time() + max(1, (int) $settings['retention_hours']) * HOUR_IN_SECONDS),
         ];
@@ -154,9 +156,62 @@ final class Jobs {
             }
             $updated = $wpdb->update($table, $data, ['id' => $id, 'status' => 'processing']);
             if (!$updated && !is_wp_error($result)) { Storage::delete($result); }
+            if ($updated && !is_wp_error($result)) { self::clear_reference($id); }
         } catch (\Throwable $e) {
             // Never persist exception text: SDK errors can contain secrets or image data.
             $wpdb->update($table, ['status' => 'failed', 'error_code' => 'worker_error', 'error_message' => 'پردازش انجام نشد. مدیر سایت می‌تواند وضعیت اتصال را بررسی کند.', 'updated_at' => gmdate('Y-m-d H:i:s')], ['id' => $id, 'status' => 'processing']);
+        }
+    }
+
+    /** Commit a private result reference before its network download starts. */
+    public static function record_reference(int $id, string $path): bool {
+        global $wpdb;
+        if (is_wp_error(Storage::read_reference($path))) { return false; }
+        return $wpdb->query($wpdb->prepare('UPDATE ' . self::table() . " SET reference_path=%s WHERE id=%d AND status='processing' AND expires_at > %s AND (reference_path IS NULL OR reference_path='')", $path, $id, gmdate('Y-m-d H:i:s'))) === 1;
+    }
+
+    private static function clear_reference(int $id): void {
+        global $wpdb;
+        $job = self::by_id($id);
+        if ($job && !empty($job['reference_path'])) {
+            Storage::delete($job['reference_path']);
+            $wpdb->update(self::table(), ['reference_path' => ''], ['id' => $id, 'status' => 'completed']);
+        }
+    }
+
+    /** Download a previously produced result. This path never calls generate(). */
+    public static function recover(int $id) {
+        global $wpdb;
+        $job = self::by_id($id);
+        if (!$job || $job['status'] !== 'failed' || empty($job['reference_path']) || $job['expires_at'] <= gmdate('Y-m-d H:i:s')) {
+            return new \WP_Error('recovery_unavailable', 'برای این درخواست نشانی نتیجهٔ قابل دریافت وجود ندارد یا زمان نگهداری تمام شده است.');
+        }
+        $url = Storage::read_reference($job['reference_path']);
+        if (is_wp_error($url)) { return $url; }
+        $table = self::table();
+        $claimed = $wpdb->query($wpdb->prepare("UPDATE $table SET status='processing', recovery_attempts=recovery_attempts+1, updated_at=%s WHERE id=%d AND status='failed' AND recovery_attempts < 3 AND expires_at > %s", gmdate('Y-m-d H:i:s'), $id, gmdate('Y-m-d H:i:s')));
+        if ($claimed !== 1) { return new \WP_Error('recovery_limit', 'وضعیت درخواست تغییر کرده یا سقف سه تلاش برای دریافت نتیجه تکمیل شده است.'); }
+        try {
+            $result = Provider_Result::fetch($url);
+            if (!is_wp_error($result)) { $result = Storage::save($result['bytes']); }
+            $data = ['updated_at' => gmdate('Y-m-d H:i:s')];
+            if (is_wp_error($result)) {
+                $detail = $result->get_error_data();
+                $data += ['status' => 'failed', 'error_code' => sanitize_key($result->get_error_code()), 'error_message' => sanitize_text_field($result->get_error_message()), 'error_detail' => is_array($detail) && isset($detail['detail']) ? substr(sanitize_text_field($detail['detail']), 0, 1000) : ''];
+            } else {
+                $data += ['status' => 'completed', 'output_path' => $result, 'error_code' => '', 'error_message' => '', 'error_detail' => ''];
+            }
+            $updated = $wpdb->update($table, $data, ['id' => $id, 'status' => 'processing']);
+            if (!$updated) {
+                if (!is_wp_error($result)) { Storage::delete($result); }
+                return new \WP_Error('recovery_conflict', 'وضعیت درخواست تغییر کرده است.');
+            }
+            if (is_wp_error($result)) { return $result; }
+            self::clear_reference($id);
+            return true;
+        } catch (\Throwable $error) {
+            $wpdb->update($table, ['status' => 'failed', 'error_code' => 'recovery_error', 'error_message' => 'دریافت نتیجه کامل نشد؛ پشتیبانی می‌تواند اتصال را بررسی کند.', 'updated_at' => gmdate('Y-m-d H:i:s')], ['id' => $id, 'status' => 'processing']);
+            return new \WP_Error('recovery_error', 'دریافت نتیجه کامل نشد؛ هیچ درخواست ساخت تازه‌ای ارسال نشد.');
         }
     }
 
@@ -167,6 +222,9 @@ final class Jobs {
             return new \WP_Error('retry_unavailable', 'فقط درخواست ناموفق و منقضی‌نشده با عکس موجود قابل تکرار است.');
         }
         if ((int) $job['attempts'] >= 3) { return new \WP_Error('retry_limit', 'سقف سه تلاش برای این درخواست تکمیل شده است.'); }
+        if (!empty($job['reference_path'])) {
+            return new \WP_Error('result_available', 'نشانی نتیجهٔ قبلی ذخیره شده است؛ ابتدا از «دریافت دوبارهٔ نتیجه» استفاده کنید.');
+        }
         if (self::consume('global', max(1, (int) (Settings::get()['global_rate_limit'] ?? 50))) === false) {
             return new \WP_Error('store_limit', 'سقف ساعتی فروشگاه تکمیل است.');
         }
@@ -184,6 +242,7 @@ final class Jobs {
         if ($wpdb->delete(self::table(), ['id' => $id, 'status' => $job['status']]) !== 1) { return new \WP_Error('busy', 'وضعیت درخواست تغییر کرده است.'); }
         Storage::delete($job['input_path']);
         Storage::delete($job['output_path']);
+        Storage::delete((string) ($job['reference_path'] ?? ''));
         wp_clear_scheduled_hook('vto_process_job', [$id]);
         return true;
     }
@@ -196,11 +255,12 @@ final class Jobs {
         $wpdb->query($wpdb->prepare("UPDATE $table SET status='failed', error_code='worker_interrupted', error_message=%s, updated_at=%s WHERE status='processing' AND updated_at < %s", 'پردازش قطع شده؛ پیش از تکرار، وضعیت مصرف سرویس بررسی شود.', $now, gmdate('Y-m-d H:i:s', time() - 10 * MINUTE_IN_SECONDS)));
         $expired = $wpdb->get_col($wpdb->prepare("SELECT id FROM $table WHERE expires_at <= %s AND status <> 'processing' LIMIT 500", $now));
         foreach ($expired as $id) { self::delete((int) $id); }
-        $paths = $wpdb->get_results("SELECT input_path, output_path FROM $table", ARRAY_A);
+        $paths = $wpdb->get_results("SELECT input_path, output_path, reference_path FROM $table", ARRAY_A);
         $retained = [];
         foreach ($paths as $paths_row) {
             $retained[] = $paths_row['input_path'];
             $retained[] = $paths_row['output_path'];
+            $retained[] = (string) ($paths_row['reference_path'] ?? '');
         }
         Storage::sweep_orphans($retained);
         $queued = $wpdb->get_col($wpdb->prepare("SELECT id FROM $table WHERE status='queued' AND expires_at > %s ORDER BY id ASC LIMIT 20", $now));

@@ -109,9 +109,9 @@ try {
     add_filter('pre_http_request', $http_filter, 10, 3);
     $bad_image = VTO\Provider::generate($live_row);
     check(is_wp_error($bad_image) && $bad_image->get_error_code() === 'vto_provider_image', 'Malformed base64 provider output is rejected');
-    $response_body = ['data'=>[['url'=>'https://unsafe.example/customer-photo']]];
+    $response_body = ['data'=>[['url'=>'http://127.0.0.1/customer-photo']]];
     $url_only = VTO\Provider::generate($live_row);
-    check(is_wp_error($url_only) && $url_only->get_error_code() === 'vto_provider_format', 'Provider output URLs are not fetched or exposed to customers');
+    check(is_wp_error($url_only) && !str_contains(wp_json_encode($url_only->get_error_data()), 'customer-photo'), 'Unsafe provider output URLs are refused without exposing their contents');
     $response_code = 429;
     $response_body = ['error'=>['code'=>'rate_limit_exceeded']];
     $busy = VTO\Provider::generate($live_row);

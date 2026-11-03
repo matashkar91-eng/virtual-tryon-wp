@@ -85,6 +85,37 @@ final class Storage {
         return !is_wp_error($dir) && is_file($path) && dirname(realpath($path)) === $dir;
     }
 
+    /** A signed output URL is private data, never a public attachment or log. */
+    public static function save_reference(string $url) {
+        $parts = wp_parse_url($url);
+        if (strlen($url) > 8192 || !$parts || ($parts['scheme'] ?? '') !== 'https'
+            || empty($parts['host']) || isset($parts['user']) || isset($parts['pass']) || isset($parts['fragment'])
+            || (isset($parts['port']) && $parts['port'] !== 443)) {
+            return new \WP_Error('output_reference_invalid', 'نشانی خصوصی نتیجه معتبر نیست.');
+        }
+        $dir = self::directory();
+        if (is_wp_error($dir)) { return $dir; }
+        $path = $dir . '/' . bin2hex(random_bytes(24)) . '.reference';
+        $bytes = wp_json_encode(['url' => $url]);
+        if (!is_string($bytes) || file_put_contents($path, $bytes, LOCK_EX) !== strlen($bytes)) {
+            self::delete($path);
+            return new \WP_Error('output_reference_save', 'ذخیرهٔ خصوصی نشانی نتیجه انجام نشد.');
+        }
+        @chmod($path, 0600);
+        return $path;
+    }
+
+    public static function read_reference(string $path) {
+        if (!preg_match('/^[a-f0-9]{48}\.reference$/D', basename($path)) || !self::owns($path) || filesize($path) > 65536) {
+            return new \WP_Error('output_reference_missing', 'نشانی خصوصی نتیجه موجود نیست یا منقضی شده است.');
+        }
+        $data = json_decode(file_get_contents($path), true, 4);
+        if (!is_array($data) || !isset($data['url']) || !is_string($data['url']) || strlen($data['url']) > 8192) {
+            return new \WP_Error('output_reference_invalid', 'نشانی خصوصی نتیجه قابل خواندن نیست.');
+        }
+        return $data['url'];
+    }
+
     public static function delete(string $path): void {
         if ($path && self::owns($path)) { wp_delete_file($path); }
     }
@@ -95,7 +126,7 @@ final class Storage {
         if (is_wp_error($dir)) { return; }
         $keep = array_fill_keys($retained, true);
         foreach (new \DirectoryIterator($dir) as $file) {
-            if (!$file->isFile() || $file->isLink() || !preg_match('/^[a-f0-9]{48}\.(jpg|image)$/D', $file->getFilename())) { continue; }
+            if (!$file->isFile() || $file->isLink() || !preg_match('/^[a-f0-9]{48}\.(jpg|image|reference)$/D', $file->getFilename())) { continue; }
             $path = $file->getPathname();
             if (!isset($keep[$path]) && $file->getMTime() < time() - HOUR_IN_SECONDS) { self::delete($path); }
         }

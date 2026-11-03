@@ -300,6 +300,8 @@ final class Admin {
         $result = new \WP_Error('invalid_action', 'عملیات نامعتبر است.');
         if ($action === 'retry') {
             $result = Jobs::retry($id);
+        } elseif ($action === 'recover') {
+            $result = Jobs::recover($id);
         } elseif ($action === 'delete') {
             $result = Jobs::delete($id);
         }
@@ -319,9 +321,9 @@ final class Admin {
         ?>
         <div class="wrap vto-admin" dir="rtl"><div class="vto-admin-header"><div><span class="vto-kicker">REQUEST HISTORY</span><h1>درخواست‌ها و تصاویر</h1><p>۵۰ درخواست اخیر؛ عکس‌ها فقط برای مدیر مجاز قابل مشاهده‌اند.</p></div><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=vto-settings')); ?>">تنظیمات فروشگاه ←</a></div>
             <?php if (isset($_GET['vto_notice'])) : $notice = sanitize_key(wp_unslash($_GET['vto_notice'])); ?>
-                <div class="notice <?php echo $notice === 'error' ? 'notice-error' : 'notice-success'; ?>"><p><?php echo $notice === 'error' ? 'عملیات انجام نشد. ممکن است درخواست منقضی شده یا برای تلاش دوباره قابل استفاده نباشد.' : ($notice === 'delete' ? 'درخواست و تصاویر محلی آن حذف شدند.' : 'درخواست برای تلاش دوباره ثبت شد؛ فراخوانی API ممکن است اعتبار مصرف کند.'); ?></p></div>
+                <div class="notice <?php echo $notice === 'error' ? 'notice-error' : 'notice-success'; ?>"><p><?php echo $notice === 'error' ? 'عملیات انجام نشد. جزئیات همان ردیف را بررسی کنید؛ ممکن است درخواست یا لینک نتیجه منقضی شده باشد.' : ($notice === 'delete' ? 'درخواست و تصاویر محلی آن حذف شدند.' : ($notice === 'recover' ? 'نتیجهٔ قبلی دریافت و ذخیره شد؛ درخواست ساخت تصویر جدیدی ارسال نشد.' : 'درخواست برای ساخت دوباره ثبت شد؛ فراخوانی API ممکن است اعتبار مصرف کند.')); ?></p></div>
             <?php endif; ?>
-            <p class="vto-warning">تلاش مجدد می‌تواند اعتبار API مصرف کند. حذف، فایل‌های محلی را پاک می‌کند و درخواست ارسال‌شده به سرویس بیرونی را پس نمی‌گیرد.</p>
+            <p class="vto-warning">«ساخت دوباره» می‌تواند اعتبار API مصرف کند. «دریافت دوبارهٔ نتیجه» فقط دریافت خروجی قبلی را امتحان می‌کند و درخواست ساخت جدید نمی‌فرستد. حذف، فایل‌های محلی را پاک می‌کند و درخواست ارسال‌شده به سرویس بیرونی را پس نمی‌گیرد.</p>
             <div class="vto-jobs-scroll"><table class="widefat striped vto-jobs-table"><thead><tr><th>شناسه / محصول</th><th>وضعیت / زمان</th><th>عکس‌ها</th><th>جزئیات و خطا</th><th>عملیات</th></tr></thead><tbody>
             <?php if (!$jobs) : ?><tr><td colspan="5">هنوز درخواستی ثبت نشده است. از برگهٔ پرو یک درخواست آزمایشی بسازید.</td></tr><?php endif; ?>
             <?php foreach ($jobs as $job) : $job = (array) $job; $id = absint($job['id']); $status = isset($job['status']) ? $job['status'] : ''; ?>
@@ -331,10 +333,11 @@ final class Admin {
                 <?php endforeach; ?></td><td>
                     <?php if (!empty($job['error_code'])) : ?><code dir="ltr"><?php echo esc_html($job['error_code']); ?></code><br><?php endif; ?>
                     <?php echo esc_html(isset($job['error_message']) ? $job['error_message'] : ''); ?>
+                    <?php if ($status === 'failed' && !empty($job['reference_path'])) : ?><p class="description">سرویس برای این درخواست نشانیِ نتیجه برگردانده و مرجع آن به‌صورت خصوصی ذخیره شده است. اگر لینک هنوز معتبر و منقضی‌نشده باشد، می‌توانید با «دریافت دوبارهٔ نتیجه» آن را بدون ساخت تصویر جدید دریافت کنید.</p><?php endif; ?>
                     <?php if (!empty($job['error_detail'])) : ?><details><summary>جزئیات فنی خطا برای مدیر</summary><pre class="vto-diagnostic" dir="auto"><?php echo esc_html($job['error_detail']); ?></pre></details><?php endif; ?>
                     <?php if (!empty($job['provider_request_id'])) : ?><br><small>شناسهٔ سرویس: <code dir="ltr"><?php echo esc_html($job['provider_request_id']); ?></code></small><?php endif; ?>
                     <details><summary>تنظیمات هنگام ثبت درخواست</summary><dl class="vto-job-snapshot"><dt>حالت اجرا</dt><dd><?php echo isset($job['mode']) && $job['mode'] === 'avalai' ? 'واقعی؛ AvalAI' : 'آزمایشی؛ بدون ساخت تصویر واقعی'; ?></dd><dt>مدل</dt><dd><code dir="ltr"><?php echo esc_html(isset($job['model']) ? $job['model'] : ''); ?></code></dd><dt>پرامپت ارسال‌شده</dt><dd><pre class="vto-diagnostic" dir="auto"><?php echo esc_html(isset($job['prompt']) ? $job['prompt'] : ''); ?></pre></dd></dl><p class="description">تلاش دوباره از همین حالت، مدل و پرامپت ذخیره‌شده استفاده می‌کند. برای آزمایش تنظیمات جدید، یک درخواست تازه بسازید.</p></details>
-                    </td><td><?php if ($status === 'failed') { self::job_button($id, 'retry', 'تلاش دوباره'); } self::job_button($id, 'delete', 'حذف عکس‌ها و درخواست'); ?></td></tr>
+                    </td><td><?php if ($status === 'failed' && !empty($job['reference_path'])) { self::job_button($id, 'recover', 'دریافت دوبارهٔ نتیجه (بدون ساخت جدید)'); } if ($status === 'failed' && empty($job['reference_path'])) { self::job_button($id, 'retry', 'ساخت دوبارهٔ تصویر (احتمال مصرف اعتبار)'); } self::job_button($id, 'delete', 'حذف عکس‌ها و درخواست'); ?></td></tr>
             <?php endforeach; ?>
             </tbody></table></div><p class="description">برای تازه‌کردن وضعیت، صفحه را بازخوانی کنید. زمان‌ها بر حسب UTC هستند. خطاهای سرویس به شکل پاک‌سازی‌شده نمایش داده می‌شوند؛ کلید API و محتوای حساس پاسخ ذخیره نمی‌شود.</p>
         </div><script>document.querySelectorAll('.vto-delete-job').forEach(function(button){button.addEventListener('click',function(event){if(!window.confirm('درخواست و عکس‌های محلی آن برای همیشه حذف شوند؟')){event.preventDefault();}});});</script>

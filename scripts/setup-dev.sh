@@ -131,6 +131,7 @@ echo 'Prepared WordPress '.get_bloginfo('version').' / WooCommerce '.WC_VERSION.
 PHP
 # Unit/provider mocks never call a paid provider. Tests restore storefront settings.
 VTO_WP_ROOT="$vto_wp" "$vto_php" "$vto_plugin_dir/tests/integration.php"
+VTO_WP_ROOT="$vto_wp" "$vto_php" "$vto_plugin_dir/tests/provider-results.php"
 vto_port="$("$vto_php" -r '$u=parse_url(getenv("VTO_DEV_URL"));echo $u["port"] ?? 80;')"
 echo "Start: $vto_php -S 127.0.0.1:$vto_port -t $vto_wp"
 echo "HTTP checks: VTO_WP_ROOT=$vto_wp VTO_PHP=$vto_php python3 $vto_plugin_dir/tests/http-smoke.py"

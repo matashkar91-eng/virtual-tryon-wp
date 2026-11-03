@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.3
+Stable tag: 0.1.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -28,6 +28,12 @@ AvalAI multi-image endpoint/model compatibility has NOT been live verified.
 Demo returns the original photo and does not change garments or accessories.
 
 == Changelog ==
+= 0.1.4 =
+Accept standard base64 and HTTPS image-URL results with safe bounded downloads.
+Keep result references privately for GET-only recovery without regenerating.
+Add safe response-shape diagnostics for unsupported JSON, HTML or pending replies.
+This does not retrospectively recover response bodies discarded by older versions.
+
 = 0.1.3 =
 Add administrator-only, nonce-protected read-only connection/model probe.
 Distinguish DNS, connect, TLS, timeout and generic transport failures using

@@ -27,3 +27,11 @@ The Python suite uses only the standard library and real HTTP requests. It check
 Optional `VTO_BASE_URL` overrides the site's home URL for HTTP requests. Optional `VTO_PHP` specifies the PHP binary used by the HTTP suite. `VTO_WP_LOAD` is an alternative to `VTO_WP_ROOT` for the PHP suite.
 
 Validated in this workspace with PHP 8.4.27, WordPress 7.0, WooCommerce 11.2.1 and the official WordPress SQLite database integration. SQLite validation does not establish compatibility with every MySQL/MariaDB deployment, theme, caching layer, or reverse proxy. Run these checks again on a staging copy of the intended host before release.
+
+Provider output parsing and result recovery have a separate real-WordPress suite:
+
+```sh
+VTO_WP_ROOT=/absolute/path/to/wordpress php tests/provider-results.php
+```
+
+This suite intercepts every outbound HTTP request. It exercises standard base64 and URL image results, private signed-reference storage, result-download failures, GET-only recovery without a second paid generation, separate recovery limits, safe redirects and URL validation, invalid image responses, redacted unknown-response diagnostics, and reference-file cleanup. It does not validate the live provider account or undocumented response formats.

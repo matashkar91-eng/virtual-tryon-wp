@@ -5,10 +5,11 @@ require_once __DIR__ . '/includes/class-settings.php';
 require_once __DIR__ . '/includes/class-storage.php';
 global $wpdb;
 $vto_table = $wpdb->prefix . 'vto_jobs';
-$vto_rows = $wpdb->get_results("SELECT input_path, output_path FROM {$vto_table}", ARRAY_A);
+$vto_rows = $wpdb->get_results("SELECT * FROM {$vto_table}", ARRAY_A);
 foreach ((array) $vto_rows as $vto_row) {
     \VTO\Storage::delete($vto_row['input_path']);
     \VTO\Storage::delete($vto_row['output_path']);
+    \VTO\Storage::delete((string) ($vto_row['reference_path'] ?? ''));
 }
 $vto_dir = \VTO\Storage::directory();
 if (!is_wp_error($vto_dir) && count(scandir($vto_dir)) === 2) { @rmdir($vto_dir); }

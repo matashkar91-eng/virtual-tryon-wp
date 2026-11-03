@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -25,6 +25,11 @@ AvalAI multi-image endpoint/model compatibility has NOT been live verified.
 Demo returns the original photo and does not change garments or accessories.
 
 == Changelog ==
+= 0.1.1 =
+Use gpt-image-2.5-flare for new settings: OpenAI retired gpt-image-1 on
+October 23, 2026. Existing saved model settings are preserved; merchants can
+change the model field manually. AvalAI routing still requires live validation.
+
 = 0.1.0 =
 Initial development release. Enable paid public use only after live provider
 validation and the deployment checks in README.md.

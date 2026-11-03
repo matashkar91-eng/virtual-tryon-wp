@@ -11,7 +11,7 @@ final class Settings {
         return array(
             'mode' => 'demo',
             'api_key' => '',
-            'model' => 'gpt-image-1',
+            'model' => 'gpt-image-2.5-flare',
             'category' => 'auto',
             'garment_type' => 'scarf',
             'prompt' => 'Create a realistic virtual try-on of {product} ({category}) on the person in the input photo. Preserve the person, face, body proportions, pose, lighting and background. Change only the selected garment or accessory. Preserve its material, pattern and colors. Use a clean, natural result.',

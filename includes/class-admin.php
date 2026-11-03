@@ -22,7 +22,7 @@ final class Admin {
         if (strpos($hook, 'vto-') === false) {
             return;
         }
-        wp_enqueue_style('vto-admin', plugins_url('../assets/admin.css', __FILE__), array(), '0.1.0');
+        wp_enqueue_style('vto-admin', plugins_url('../assets/admin.css', __FILE__), array(), VTO_VERSION);
         if (strpos($hook, 'vto-settings') !== false) {
             wp_enqueue_media();
         }

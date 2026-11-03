@@ -10,6 +10,7 @@ final class Admin {
         add_action('admin_menu', array(__CLASS__, 'menu'));
         add_action('admin_enqueue_scripts', array(__CLASS__, 'assets'));
         add_action('admin_post_vto_job_action', array(__CLASS__, 'job_action'));
+        add_action('admin_post_vto_check_connection', array(__CLASS__, 'check_connection'));
     }
 
     public static function menu() {
@@ -66,6 +67,7 @@ final class Admin {
         <div class="wrap vto-admin" dir="rtl">
             <div class="vto-admin-header"><div><span class="vto-kicker">VIRTUAL TRY-ON</span><h1>اتاق پروی فروشگاه شما</h1><p>یک افزونه، با ظاهر و محصولات مخصوص فروشگاه شما.</p></div><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=vto-jobs')); ?>">درخواست‌ها و تصاویر ←</a></div>
             <?php settings_errors(); ?>
+            <?php self::connection_notice(); ?>
             <?php if (class_exists('VTO\\Storage')) : $storage = Storage::directory(); if (is_wp_error($storage)) : ?><div class="notice notice-error"><p><strong>فضای خصوصی تصاویر آماده نیست:</strong> <?php echo esc_html($storage->get_error_message()); ?> مسیر قابل‌نوشتن خارج از ریشهٔ عمومی سایت را با ثابت <code>VTO_PRIVATE_DIR</code> در <code>wp-config.php</code> تعیین کنید. فایل عکس مشتری نباید مستقیم از وب قابل دریافت باشد.</p></div><?php endif; endif; ?>
             <?php if (!extension_loaded('gd') && !extension_loaded('imagick')) : ?><div class="notice notice-warning"><p>برای پردازش امن تصویر، افزونهٔ PHP GD یا Imagick را روی میزبان فعال کنید.</p></div><?php endif; ?>
             <div class="vto-guide"><strong>شروع سریع</strong><span>۱. محصول‌ها را فعال کنید.</span><span>۲. یک برگه بسازید و کد <code>[virtual_tryon]</code> را در آن بگذارید.</span><span>۳. ابتدا در حالت آزمایشی بررسی کنید، سپس API را فعال کنید.</span></div>
@@ -109,7 +111,7 @@ final class Admin {
                     </tbody></table><p><button type="button" class="button" id="vto-add-manual">+ افزودن محصول مستقل</button></p></details>
                 </section>
 
-                <section class="vto-card" id="vto-provider"><h2>اتصال به اول‌ای‌آی (AvalAI)</h2><p class="vto-warning">اتصال واقعی این نسخه هنوز با حساب AvalAI تأیید نشده است. آداپتور با قالب ویرایش تصویر سازگار با OpenAI و دو تصویر ورودی نوشته شده؛ پیش از عرضه، پشتیبانی مسیر و مدل را با مستندات و حساب خود بررسی و یک درخواست واقعی آزمایش کنید.</p><table class="form-table" role="presentation"><tbody>
+                <section class="vto-card" id="vto-provider"><h2>اتصال به اول‌ای‌آی (AvalAI)</h2><p class="vto-warning">اتصال واقعی این نسخه هنوز با حساب AvalAI تأیید نشده است. آداپتور با قالب ویرایش تصویر سازگار با OpenAI و دو تصویر ورودی نوشته شده؛ پیش از عرضه، پشتیبانی مسیر و مدل را با مستندات و حساب خود بررسی و یک درخواست واقعی آزمایش کنید.</p><p><a href="#vto-connection-test">بررسی اتصال و دسترسی مدل بدون ارسال عکس ↓</a></p><table class="form-table" role="presentation"><tbody>
                     <tr><th scope="row"><label for="vto-mode">حالت اجرا</label></th><td><?php self::select($s, 'mode', array('demo' => 'آزمایشی؛ بدون فراخوانی API و بدون تعویض لباس', 'avalai' => 'واقعی؛ اتصال به AvalAI و مصرف اعتبار')); ?><p class="description">حالت آزمایشی فقط بارگذاری، صف، پیگیری و دریافت فایل را بررسی می‌کند؛ تصویر پرو واقعی تولید نمی‌کند.</p></td></tr>
                     <tr><th scope="row"><label for="vto-api_key">کلید API</label></th><td><input class="regular-text" type="password" id="vto-api_key" name="vto_settings[api_key]" value="" autocomplete="new-password" dir="ltr" spellcheck="false"><p class="description"><?php echo defined('VTO_AVALAI_KEY') && VTO_AVALAI_KEY ? 'کلید از ثابت VTO_AVALAI_KEY در تنظیمات سرور خوانده می‌شود.' : ($s['api_key'] ? 'کلید ذخیره شده است. خالی گذاشتن این کادر کلید قبلی را نگه می‌دارد.' : 'هنوز کلیدی ذخیره نشده است. کلید را فقط از حساب AvalAI دریافت کنید.'); ?> کلید به مرورگر مشتری ارسال نمی‌شود.</p><label><input type="checkbox" name="vto_settings[clear_api_key]" value="1"> حذف کلید ذخیره‌شده در پایگاه داده</label><p class="description">برای مدیریت کلید در سرور می‌توانید ثابت <code>VTO_AVALAI_KEY</code> را در <code>wp-config.php</code> تعریف کنید. کلید ذخیره‌شده در وردپرس رمزگذاری جداگانه ندارد؛ دسترسی مدیر و پایگاه داده را محدود نگه دارید.</p></td></tr>
                     <tr><th scope="row"><label for="vto-model">شناسهٔ مدل ویرایش تصویر</label></th><td><?php self::input($s, 'model', 'text', 'dir="ltr" spellcheck="false"'); ?><p class="description">مدل باید در حساب شما از ویرایش تصویر با دو تصویر ورودی پشتیبانی کند. تغییر این نام به‌تنهایی پشتیبانی از قالب API دیگری اضافه نمی‌کند.</p></td></tr>
@@ -125,6 +127,15 @@ final class Admin {
                 </tbody></table><p class="vto-warning">عکس مشتری و لینک خصوصی پیگیری دادهٔ شخصی هستند. لینک را فقط با صاحب عکس به اشتراک بگذارید و نحوهٔ پردازش توسط سرویس بیرونی را در سیاست حریم خصوصی فروشگاه توضیح دهید.</p></section>
                 <?php submit_button('ذخیرهٔ تنظیمات فروشگاه'); ?>
             </form>
+            <section class="vto-card" id="vto-connection-test"><h2>بررسی اتصال و دسترسی مدل</h2><p>ابتدا کلید و نام مدل را در تنظیمات بالا <strong>ذخیره کنید</strong>. این بررسی از تنظیمات ذخیره‌شده استفاده می‌کند و فقط فهرست مدل‌های قابل دسترس حساب را می‌خواند؛ عکس ارسال نمی‌شود و تصویر تازه‌ای ساخته نمی‌شود.</p>
+                <form action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post">
+                    <input type="hidden" name="action" value="vto_check_connection">
+                    <?php wp_nonce_field('vto_check_connection'); ?>
+                    <?php submit_button('بررسی اتصال و دسترسی مدل (بدون ارسال عکس)', 'secondary', 'submit', false); ?>
+                </form>
+                <p class="description">موفقیت این بررسی فقط ارتباط، احراز هویت و دسترسی به فهرست مدل‌ها را نشان می‌دهد؛ پشتیبانی از ویرایش دو عکس، اعتبار کافی و کیفیت پرو را تأیید نمی‌کند. برای تکرار بررسی دست‌کم ۱۵ ثانیه صبر کنید.</p>
+                <p class="description">پس از ذخیرهٔ حالت واقعی، اگر صفحهٔ پرو هنوز برچسب آزمایشی دارد، کش <strong>همان برگهٔ پرو</strong> را در افزونه‌هایی مانند WP Rocket پاک و صفحه را تازه کنید. لینک یک درخواست قدیمی همچنان نتیجه و تنظیمات زمان ثبت خودش را نشان می‌دهد.</p>
+            </section>
             <script type="text/template" id="vto-manual-template"><?php self::manual_row('__INDEX__', array('id' => '', 'name' => '', 'image_id' => 0, 'category' => 'auto')); ?></script>
         </div>
         <script>
@@ -212,6 +223,73 @@ final class Admin {
         ?>
         <tr><td><input type="text" dir="ltr" name="<?php echo esc_attr($prefix); ?>[id]" value="<?php echo esc_attr($product['id']); ?>" placeholder="scarf-01" aria-label="شناسهٔ ثابت"></td><td><input type="text" name="<?php echo esc_attr($prefix); ?>[name]" value="<?php echo esc_attr($product['name']); ?>" aria-label="نام محصول"><input type="hidden" name="<?php echo esc_attr($prefix); ?>[category]" value="<?php echo esc_attr(isset($product['category']) ? $product['category'] : 'auto'); ?>"></td><td><div class="vto-media"><input type="hidden" name="<?php echo esc_attr($prefix); ?>[image_id]" value="<?php echo absint($product['image_id']); ?>"><span class="vto-media-preview"><?php if ($product['image_id']) { echo wp_get_attachment_image($product['image_id'], 'thumbnail'); } ?></span><button type="button" class="button vto-pick-image">انتخاب تصویر</button></div></td><td><button type="button" class="button-link-delete vto-remove-row">حذف ردیف</button></td></tr>
         <?php
+    }
+
+    /** Read-only account probe, never image generation. Results are per-admin and short-lived. */
+    public static function check_connection() {
+        self::authorize();
+        if (!isset($_SERVER['REQUEST_METHOD']) || $_SERVER['REQUEST_METHOD'] !== 'POST') {
+            wp_die('این عملیات باید با فرم بررسی اتصال انجام شود.', '', array('response' => 405));
+        }
+        check_admin_referer('vto_check_connection');
+        $user_id = get_current_user_id();
+        $guard = 'vto_connection_guard_' . $user_id;
+        if (get_transient($guard)) {
+            set_transient('vto_connection_throttled_' . $user_id, true, 15);
+            wp_safe_redirect(admin_url('admin.php?page=vto-settings#vto-connection-test'));
+            exit;
+        }
+        set_transient($guard, true, 15);
+        delete_transient('vto_connection_throttled_' . $user_id);
+        try {
+            $result = Provider::check_connection();
+        } catch (\Throwable $exception) {
+            // Exception messages may contain credentials; never store or render them.
+            $result = new \WP_Error('vto_probe_exception', 'بررسی اتصال کامل نشد. پیکربندی PHP و ارتباط سرور را بررسی کنید.');
+        }
+        if (is_wp_error($result)) {
+            $data = $result->get_error_data();
+            $notice = array(
+                'type' => 'error',
+                'code' => substr(sanitize_key($result->get_error_code()), 0, 100),
+                'message' => substr(sanitize_text_field($result->get_error_message()), 0, 1000),
+                'detail' => is_array($data) && isset($data['detail']) && is_scalar($data['detail']) ? substr(sanitize_text_field($data['detail']), 0, 1000) : '',
+                'checked_at' => gmdate('Y-m-d\TH:i:s\Z'),
+            );
+        } elseif (is_array($result) && isset($result['model'], $result['model_count'], $result['model_found'])) {
+            $notice = array(
+                'type' => 'success',
+                'model' => substr(sanitize_text_field($result['model']), 0, 190),
+                'model_found' => (bool) $result['model_found'],
+                'model_count' => min(1000000, absint($result['model_count'])),
+                'checked_at' => gmdate('Y-m-d\TH:i:s\Z'),
+            );
+        } else {
+            $notice = array('type' => 'error', 'code' => 'vto_probe_invalid_result', 'message' => 'پاسخ بررسی اتصال قابل استفاده نیست؛ تنظیمات سرویس را بررسی کنید.', 'detail' => '', 'checked_at' => gmdate('Y-m-d\TH:i:s\Z'));
+        }
+        set_transient('vto_connection_result_' . $user_id, $notice, 120);
+        wp_safe_redirect(admin_url('admin.php?page=vto-settings#vto-connection-test'));
+        exit;
+    }
+
+    private static function connection_notice() {
+        $user_id = get_current_user_id();
+        if (get_transient('vto_connection_throttled_' . $user_id)) {
+            echo '<div class="notice notice-warning"><p>برای بررسی دوبارهٔ اتصال، ۱۵ ثانیه فاصله بدهید. نتیجهٔ زیر مربوط به آخرین بررسی انجام‌شده است.</p></div>';
+        }
+        $notice = get_transient('vto_connection_result_' . $user_id);
+        if (!is_array($notice) || empty($notice['type'])) {
+            return;
+        }
+        if ($notice['type'] === 'success') {
+            ?>
+            <div class="notice <?php echo !empty($notice['model_found']) ? 'notice-success' : 'notice-warning'; ?>"><p><strong>ارتباط و دریافت فهرست مدل‌ها موفق بود.</strong> مدل ذخیره‌شده: <code dir="ltr"><?php echo esc_html(isset($notice['model']) ? $notice['model'] : ''); ?></code>؛ <?php echo !empty($notice['model_found']) ? 'این مدل در فهرست حساب پیدا شد.' : 'این مدل در فهرست حساب پیدا نشد؛ دسترسی و نام دقیق آن را بررسی کنید.'; ?> تعداد مدل‌های گزارش‌شده: <?php echo absint(isset($notice['model_count']) ? $notice['model_count'] : 0); ?>.</p><p>این نتیجه فقط ارتباط، احراز هویت و فهرست مدل‌ها را بررسی می‌کند؛ ویرایش تصویر و ساخت پرو آزمایش نشده است.</p><p class="description">زمان بررسی: <span dir="ltr"><?php echo esc_html(isset($notice['checked_at']) ? $notice['checked_at'] : ''); ?></span> (UTC)</p></div>
+            <?php
+        } else {
+            ?>
+            <div class="notice notice-error"><p><strong>بررسی اتصال موفق نشد.</strong> <?php echo esc_html(isset($notice['message']) ? $notice['message'] : ''); ?></p><?php if (!empty($notice['code'])) : ?><p><code dir="ltr"><?php echo esc_html($notice['code']); ?></code></p><?php endif; ?><?php if (!empty($notice['detail'])) : ?><details><summary>جزئیات فنی برای مدیر</summary><pre class="vto-diagnostic" dir="auto"><?php echo esc_html($notice['detail']); ?></pre></details><?php endif; ?><p class="description">زمان بررسی: <span dir="ltr"><?php echo esc_html(isset($notice['checked_at']) ? $notice['checked_at'] : ''); ?></span> (UTC). هیچ عکس یا درخواست ساخت تصویری در این بررسی ارسال نشد.</p></div>
+            <?php
+        }
     }
 
     public static function job_action() {

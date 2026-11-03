@@ -127,6 +127,58 @@ try {
         check(is_wp_error($invalid_model) && $invalid_model->get_error_code() === 'vto_provider_model', 'Queue provider enforces the same model identifier rules as settings');
     }
     remove_filter('pre_http_request', $http_filter, 10);
+    $transport_message = '';
+    $transport_calls = 0;
+    $http_filter = function($pre, $args, $url) use (&$transport_message, &$transport_calls) {
+        if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
+        $transport_calls++;
+        return new WP_Error('http_request_failed', $transport_message);
+    };
+    add_filter('pre_http_request', $http_filter, 10, 3);
+    foreach ([28=>'vto_provider_timeout', 60=>'vto_provider_tls', 6=>'vto_provider_dns', 7=>'vto_provider_connect', 56=>'vto_provider_transport'] as $errno=>$expected_code) {
+        $transport_message = 'cURL error '.$errno.': Authorization: Bearer SECRET-DIAGNOSTIC-SENTINEL https://example.invalid/private?token=PERSONAL-SENTINEL';
+        $transport_error = VTO\Provider::generate($live_row);
+        check(is_wp_error($transport_error) && $transport_error->get_error_code() === $expected_code, 'Transport class is diagnosed safely for cURL '.$errno);
+        $transport_safe = wp_json_encode([$transport_error->get_error_message(), $transport_error->get_error_data()]);
+        check(!str_contains($transport_safe, 'SECRET-DIAGNOSTIC') && !str_contains($transport_safe, 'PERSONAL-SENTINEL') && str_contains($transport_safe, (string)$errno), 'Diagnostics retain numeric transport evidence without raw credentials or URLs');
+    }
+    $transport_message = 'cURL error 28: TIMEOUT-RAW-SENTINEL';
+    $timeout_input = VTO\Storage::save($png); $temporary_paths[] = $timeout_input;
+    $timeout_job = VTO\Jobs::create(VTO\Catalog::find('wc:'.$product_id), $timeout_input);
+    $created_jobs[] = $timeout_job['id'];
+    VTO\Jobs::process($timeout_job['id']);
+    $timeout_row = VTO\Jobs::by_id($timeout_job['id']);
+    $calls_after_timeout = $transport_calls;
+    VTO\Jobs::process($timeout_job['id']);
+    check($timeout_row['status'] === 'failed' && $timeout_row['error_code'] === 'vto_provider_timeout' && str_contains($timeout_row['error_detail'], '28') && !str_contains($timeout_row['error_detail'], 'TIMEOUT-RAW'), 'Queue persists safe timeout evidence for administrators');
+    check($transport_calls === $calls_after_timeout, 'Uncertain transport failure is never automatically resubmitted');
+    remove_filter('pre_http_request', $http_filter, 10);
+    $probe_response = ['data'=>[['id'=>$settings['model']]]];
+    $probe_calls = 0;
+    $probe_status = 200;
+    $http_filter = function($pre, $args, $url) use (&$probe_response, &$probe_status, &$probe_calls) {
+        if ($url !== 'https://api.avalai.ir/v1/models') { throw new RuntimeException('Probe attempted an unexpected endpoint.'); }
+        $probe_calls++;
+        check($args['method'] === 'GET' && $args['sslverify'] === true && $args['redirection'] === 0 && empty($args['body']), 'Connection probe uses verified read-only GET without photos');
+        return ['headers'=>[], 'response'=>['code'=>$probe_status,'message'=>'Mock'], 'body'=>wp_json_encode($probe_response), 'cookies'=>[]];
+    };
+    add_filter('pre_http_request', $http_filter, 10, 3);
+    $probe = VTO\Provider::check_connection();
+    check(!is_wp_error($probe) && $probe['model_found'] === true && $probe['model_count'] === 1, 'Read-only probe identifies selected model availability');
+    $probe_response = ['data'=>[['id'=>'different-model']]];
+    $probe = VTO\Provider::check_connection();
+    check(!is_wp_error($probe) && $probe['model_found'] === false, 'Connectivity success does not imply selected model access');
+    $probe_response = ['error'=>['code'=>'PROBE-CODE-SECRET-SENTINEL','message'=>'PROBE-RAW-SECRET-SENTINEL']];
+    $probe_status = 401;
+    $probe = VTO\Provider::check_connection();
+    check(is_wp_error($probe) && !str_contains(wp_json_encode($probe->get_error_data()), 'PROBE-RAW') && !str_contains(wp_json_encode($probe->get_error_data()), 'PROBE-CODE'), 'Probe authorization errors never expose raw upstream details or arbitrary codes');
+    $without_key = $settings; $without_key['api_key'] = '';
+    update_option('vto_settings', $without_key, false);
+    $probe_count = $probe_calls;
+    $probe = VTO\Provider::check_connection();
+    check(is_wp_error($probe) && $probe_count === $probe_calls, 'Missing key blocks connectivity probe before any network request');
+    update_option('vto_settings', $settings, false);
+    remove_filter('pre_http_request', $http_filter, 10);
     $http_filter = function($pre, $args, $url) {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
         return ['headers'=>[], 'response'=>['code'=>401,'message'=>'Unauthorized'], 'body'=>'{"error":{"code":"invalid_api_key","message":"do not persist arbitrary upstream messages"}}', 'cookies'=>[]];

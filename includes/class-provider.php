@@ -12,6 +12,10 @@ defined('ABSPATH') || exit;
 
 final class Provider {
     const ENDPOINT = 'https://api.avalai.ir/v1/images/edits';
+    const MODELS_ENDPOINT = 'https://api.avalai.ir/v1/models';
+    const EDIT_TIMEOUT = 110;
+    const PROBE_TIMEOUT = 15;
+    const MAX_MODELS_RESPONSE_BYTES = 4194304;
     const MAX_IMAGE_BYTES = 15728640;
     const MAX_RESPONSE_BYTES = 23068672;
 
@@ -64,8 +68,9 @@ final class Provider {
             . self::image_part($boundary, 'product', $product)
             . '--' . $boundary . "--\r\n";
 
+        $started = self::clock();
         $response = wp_safe_remote_post(self::ENDPOINT, array(
-            'timeout' => 110,
+            'timeout' => self::EDIT_TIMEOUT,
             'redirection' => 0,
             'sslverify' => true,
             'limit_response_size' => self::MAX_RESPONSE_BYTES,
@@ -77,11 +82,10 @@ final class Provider {
             'body' => $body,
             'data_format' => 'body',
         ));
+        $elapsed = max(0.0, self::clock() - $started);
         unset($body, $key);
         if (is_wp_error($response)) {
-            // Do not retain the transport message: a plugin/proxy may include
-            // request headers or other sensitive material in it.
-            return self::error('vto_provider_transport', 'پاسخ سرویس دریافت نشد. ممکن است درخواست پردازش شده باشد؛ برای جلوگیری از هزینهٔ تکراری با پشتیبانی تماس بگیرید.', 'AvalAI transport failure; request completion is unknown. No automatic retry.');
+            return self::transport_error($response, $elapsed, self::EDIT_TIMEOUT, true);
         }
         $status = (int) wp_remote_retrieve_response_code($response);
         $raw = wp_remote_retrieve_body($response);
@@ -105,6 +109,114 @@ final class Provider {
             return self::error('vto_provider_image', 'تصویر خروجی سرویس قابل خواندن نیست.', 'AvalAI response failed image MIME, dimensions or size validation.');
         }
         return $image;
+    }
+
+    /**
+     * Read-only account/model probe. This never uploads an image or generates
+     * one; a listed model does not establish image-edit support or quality.
+     *
+     * @return array|\WP_Error
+     */
+    public static function check_connection() {
+        $settings = Settings::get();
+        $key = defined('VTO_AVALAI_KEY') ? (string) VTO_AVALAI_KEY : (string) $settings['api_key'];
+        $key = trim($key);
+        if ('' === $key || preg_match('/[\r\n]/', $key)) {
+            return self::error('vto_provider_key', 'کلید API تنظیم نشده یا معتبر نیست.', 'Missing or invalid AvalAI API key.');
+        }
+        $model = trim((string) $settings['model']);
+        if (!Settings::valid_model($model)) {
+            return self::error('vto_provider_model', 'شناسهٔ مدل معتبر نیست؛ ابتدا تنظیمات را ذخیره کنید.', 'An image-edit-capable AvalAI model is required.');
+        }
+        $started = self::clock();
+        $response = wp_safe_remote_get(self::MODELS_ENDPOINT, array(
+            'timeout' => self::PROBE_TIMEOUT,
+            'redirection' => 0,
+            'sslverify' => true,
+            'limit_response_size' => self::MAX_MODELS_RESPONSE_BYTES,
+            'headers' => array('Authorization' => 'Bearer ' . $key, 'Accept' => 'application/json'),
+        ));
+        $elapsed = max(0.0, self::clock() - $started);
+        unset($key);
+        if (is_wp_error($response)) {
+            return self::transport_error($response, $elapsed, self::PROBE_TIMEOUT, false);
+        }
+        $status = (int) wp_remote_retrieve_response_code($response);
+        $raw = wp_remote_retrieve_body($response);
+        if (strlen($raw) >= self::MAX_MODELS_RESPONSE_BYTES) {
+            return self::error('vto_probe_response_size', 'حجم فهرست مدل‌ها بیش از حد مجاز بود؛ نتیجهٔ اتصال تأیید نشد.', 'AvalAI model catalog response exceeded the configured maximum.');
+        }
+        $data = json_decode($raw, true, 64);
+        unset($raw);
+        if ($status < 200 || $status > 299) {
+            return self::http_error($status, $data);
+        }
+        if (!is_array($data) || !isset($data['data']) || !is_array($data['data']) || !array_is_list($data['data'])) {
+            return self::error('vto_probe_format', 'پاسخ فهرست مدل‌ها قابل خواندن نبود؛ نتیجهٔ اتصال تأیید نشد.', 'AvalAI did not return an OpenAI-compatible model catalog in data[].');
+        }
+        $found = false;
+        $count = 0;
+        foreach ($data['data'] as $entry) {
+            if (!is_array($entry) || empty($entry['id']) || !is_string($entry['id'])) { continue; }
+            $count++;
+            if ($entry['id'] === $model) { $found = true; }
+        }
+        if ($data['data'] && !$count) {
+            return self::error('vto_probe_format', 'فهرست مدل‌های سرویس ساختار معتبری ندارد؛ نتیجهٔ اتصال تأیید نشد.', 'AvalAI model catalog contained no valid model identifiers.');
+        }
+        return array('model' => $model, 'model_found' => $found, 'model_count' => $count, 'checked_at' => gmdate('c'));
+    }
+
+    /** Use a monotonic clock when supported; never record the raw error text. */
+    private static function clock() {
+        return function_exists('hrtime') ? hrtime(true) / 1000000000 : microtime(true);
+    }
+
+    private static function transport_error(\WP_Error $error, $elapsed, $timeout, $edit) {
+        $errno = null;
+        // The rest of this string may contain a key, URL or photo payload.
+        // Extract only a bounded numeric cURL error identifier; discard all text.
+        if (preg_match('/\bcURL\s+error\s+([0-9]{1,3})\b/i', $error->get_error_message(), $matches)) {
+            $errno = (int) $matches[1];
+        }
+        $allowed_codes = array('http_request_failed', 'http_request_not_executed', 'http_request_rejected', 'http_request_not_safe');
+        $wp_code = in_array($error->get_error_code(), $allowed_codes, true) ? $error->get_error_code() : 'other';
+        $category = 'transport';
+        $message = 'ارتباط با سرویس پردازش برقرار نشد یا پاسخ کامل دریافت نشد.';
+        if (28 === $errno) {
+            $category = 'timeout';
+            $message = 'زمان انتظار برای پاسخ سرویس به پایان رسید.';
+        } elseif (in_array($errno, array(5, 6), true)) {
+            $category = 'dns';
+            $message = 'سرور فروشگاه نتوانست نام سرویس یا پراکسی را پیدا کند؛ پشتیبانی هاست باید DNS را بررسی کند.';
+        } elseif (7 === $errno) {
+            $category = 'connect';
+            $message = 'اتصال سرور فروشگاه به سرویس برقرار نشد؛ پشتیبانی هاست باید دسترسی خروجی را بررسی کند.';
+        } elseif (in_array($errno, array(35, 51, 58, 60, 77), true)) {
+            $category = 'tls';
+            $message = 'اتصال امن سرور به سرویس تأیید نشد؛ پشتیبانی هاست باید گواهی و تنظیمات TLS را بررسی کند.';
+        } elseif (in_array($wp_code, array('http_request_not_executed', 'http_request_rejected', 'http_request_not_safe'), true)) {
+            $category = 'blocked';
+            $message = 'درخواست خروجی سرور توسط تنظیمات وردپرس یا میزبان متوقف شد؛ پشتیبانی باید دسترسی سرویس را بررسی کند.';
+        } elseif (56 === $errno) {
+            // Error 56 is a receive failure, not proof of a proxy problem.
+            $message = 'ارتباط با سرویس هنگام دریافت پاسخ قطع شد.';
+        }
+        $detail = 'AvalAI ' . ($edit ? 'image edit' : 'read-only model probe') . ' transport failure; classification=' . $category
+            . '; wp_error=' . $wp_code . '; ' . ($errno === null ? 'cURL error unavailable' : 'cURL error ' . $errno)
+            . '; elapsed_seconds=' . number_format(max(0.0, (float) $elapsed), 2, '.', '')
+            . '; configured_timeout_seconds=' . (int) $timeout . '.';
+        if ($edit) {
+            $message .= ' ممکن است درخواست پردازش شده باشد؛ برای جلوگیری از هزینهٔ تکراری با پشتیبانی تماس بگیرید.';
+            $detail .= ' Edit completion and billing are unknown. No automatic retry.';
+        } else {
+            $message .= ' این بررسی هیچ تصویری برای ساخت ارسال نکرد.';
+            $detail .= ' No image was uploaded or generated; edit compatibility was not tested.';
+        }
+        return new \WP_Error('vto_provider_' . $category, $message, array(
+            'detail' => $detail, 'classification' => $category, 'curl_errno' => $errno,
+            'elapsed_seconds' => round(max(0.0, (float) $elapsed), 2), 'timeout_seconds' => (int) $timeout,
+        ));
     }
 
     private static function product_image(array $job) {
@@ -176,8 +288,15 @@ final class Provider {
 
     private static function http_error($status, $data) {
         $provider_code = '';
-        if (is_array($data) && isset($data['error']['code']) && is_scalar($data['error']['code'])) {
-            $provider_code = substr(preg_replace('/[^a-zA-Z0-9_:-]/', '', (string) $data['error']['code']), 0, 80);
+        $allowed_codes = array(
+            'invalid_api_key', 'authentication_error', 'insufficient_quota', 'rate_limit_exceeded',
+            'model_not_found', 'invalid_request_error', 'content_policy_violation', 'billing_hard_limit_reached',
+            'unsupported_model', 'invalid_value', 'image_parse_error', 'permission_denied',
+        );
+        if (is_array($data) && isset($data['error']['code']) && in_array($data['error']['code'], $allowed_codes, true)) {
+            // Even a syntactically valid upstream code could contain a key.
+            // Retain only known, fixed diagnostic identifiers.
+            $provider_code = $data['error']['code'];
         }
         $detail = 'AvalAI HTTP ' . $status . ($provider_code ? '; provider code: ' . $provider_code : '') . '.';
         if (401 === $status || 403 === $status) {

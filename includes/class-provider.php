@@ -14,6 +14,7 @@ final class Provider {
     const ENDPOINT = 'https://api.avalai.ir/v1/images/edits';
     const MODELS_ENDPOINT = 'https://api.avalai.ir/v1/models';
     const EDIT_TIMEOUT = 110;
+    const EDIT_CONNECT_TIMEOUT = 20;
     const PROBE_TIMEOUT = 15;
     const MAX_MODELS_RESPONSE_BYTES = 4194304;
     const MAX_IMAGE_BYTES = 15728640;
@@ -69,7 +70,8 @@ final class Provider {
             . '--' . $boundary . "--\r\n";
 
         $started = self::clock();
-        $response = wp_safe_remote_post(self::ENDPOINT, array(
+        $transport = array();
+        $response = self::edit_request(array(
             'timeout' => self::EDIT_TIMEOUT,
             'redirection' => 0,
             'sslverify' => true,
@@ -81,23 +83,186 @@ final class Provider {
             ),
             'body' => $body,
             'data_format' => 'body',
-        ));
+        ), $transport);
         $elapsed = max(0.0, self::clock() - $started);
         unset($body, $key);
         if (is_wp_error($response)) {
-            return self::transport_error($response, $elapsed, self::EDIT_TIMEOUT, true);
+            return self::with_transport_diagnostics(self::transport_error($response, $elapsed, self::EDIT_TIMEOUT, true), $transport);
         }
         $status = (int) wp_remote_retrieve_response_code($response);
         $raw = wp_remote_retrieve_body($response);
         if (strlen($raw) >= self::MAX_RESPONSE_BYTES) {
-            return self::error('vto_provider_response_size', 'حجم پاسخ سرویس بیش از حد مجاز بود. لطفاً با پشتیبانی تماس بگیرید.', 'AvalAI response exceeded the configured maximum.');
+            return self::with_transport_diagnostics(self::error('vto_provider_response_size', 'حجم پاسخ سرویس بیش از حد مجاز بود. لطفاً با پشتیبانی تماس بگیرید.', 'AvalAI response exceeded the configured maximum.'), $transport);
         }
         if ($status < 200 || $status > 299) {
             $data = json_decode($raw, true, 64);
-            return self::http_error($status, $data);
+            return self::with_transport_diagnostics(self::http_error($status, $data), $transport);
         }
         unset($raw);
-        return Provider_Result::decode($response, $job);
+        return self::with_transport_diagnostics(Provider_Result::decode($response, $job), $transport);
+    }
+
+    /**
+     * Keep timeout overrides local to this one owned edit request. The marker is
+     * an internal HTTP argument, never an outbound header or multipart field.
+     * The plugin issues no alternative transport, fallback or second POST.
+     */
+    private static function edit_request(array $args, array &$diagnostics) {
+        $marker = bin2hex(random_bytes(16));
+        $args['method'] = 'POST';
+        $args['_vto_edit_guard'] = $marker;
+        $content_type = $args['headers']['Content-Type'];
+        $owned_handle = null;
+        $default_ca = ABSPATH . WPINC . '/certificates/ca-bundle.crt';
+        $ca_bundle = is_file($default_ca) ? $default_ca : true;
+        $diagnostics = array(
+            'args_guard_applied' => false, 'curl_guard_applied' => false, 'curl_guard_ok' => false,
+            'timeout_before_guard_seconds' => null, 'effective_timeout_seconds' => null,
+            'connect_timeout_seconds' => null, 'low_speed_guard_applied' => false,
+            'requests_guard_applied' => false, 'replay_guard_applied' => false, 'replay_blocked' => false,
+        );
+        $owns = static function ($request, $url) use ($marker) {
+            return $url === self::ENDPOINT && is_array($request)
+                && strtoupper((string) ($request['method'] ?? '')) === 'POST'
+                && isset($request['_vto_edit_guard']) && is_string($request['_vto_edit_guard'])
+                && hash_equals($marker, $request['_vto_edit_guard']);
+        };
+        $args_guard = static function ($request, $url) use ($owns, $content_type, &$diagnostics, &$ca_bundle) {
+            if (!$owns($request, $url)) { return $request; }
+            $observed = isset($request['timeout']) && is_numeric($request['timeout']) ? (float) $request['timeout'] : null;
+            $diagnostics['timeout_before_guard_seconds'] = $observed !== null && is_finite($observed) && $observed >= 0 && $observed <= 86400 ? $observed : null;
+            $request['timeout'] = self::EDIT_TIMEOUT;
+            $request['redirection'] = 0;
+            $request['sslverify'] = true;
+            if (isset($request['sslcertificates']) && is_string($request['sslcertificates']) && is_file($request['sslcertificates'])) {
+                $ca_bundle = $request['sslcertificates'];
+            }
+            $request['reject_unsafe_urls'] = true;
+            $request['blocking'] = true;
+            $request['stream'] = false;
+            $request['filename'] = null;
+            $request['limit_response_size'] = self::MAX_RESPONSE_BYTES;
+            if (is_string($request['headers'] ?? null)) {
+                $processed = \WP_Http::processHeaders($request['headers']);
+                $request['headers'] = $processed['headers'];
+            }
+            if (is_array($request['headers'] ?? null)) {
+                foreach (array_keys($request['headers']) as $name) {
+                    if (is_string($name) && in_array(strtolower($name), array('accept-encoding', 'content-type'), true)) { unset($request['headers'][$name]); }
+                }
+                $request['headers']['Content-Type'] = $content_type;
+                $request['headers']['Accept-Encoding'] = 'identity';
+            }
+            $diagnostics['args_guard_applied'] = true;
+            $diagnostics['effective_timeout_seconds'] = self::EDIT_TIMEOUT;
+            return $request;
+        };
+        $curl_guard = static function ($handle, $request, $url) use ($owns, &$diagnostics, &$owned_handle) {
+            if (!$owns($request, $url) || !function_exists('curl_setopt')) { return; }
+            $diagnostics['curl_guard_applied'] = true;
+            $owned_handle = $handle;
+            $options = array(
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_MAXREDIRS => 0,
+                CURLOPT_LOW_SPEED_LIMIT => 0,
+                CURLOPT_LOW_SPEED_TIME => 0,
+                CURLOPT_ENCODING => 'identity',
+            );
+            if (defined('CURLOPT_HTTP_CONTENT_DECODING')) { $options[CURLOPT_HTTP_CONTENT_DECODING] = false; }
+            $options[defined('CURLOPT_TIMEOUT_MS') ? CURLOPT_TIMEOUT_MS : CURLOPT_TIMEOUT] = defined('CURLOPT_TIMEOUT_MS') ? self::EDIT_TIMEOUT * 1000 : self::EDIT_TIMEOUT;
+            $options[defined('CURLOPT_CONNECTTIMEOUT_MS') ? CURLOPT_CONNECTTIMEOUT_MS : CURLOPT_CONNECTTIMEOUT] = defined('CURLOPT_CONNECTTIMEOUT_MS') ? self::EDIT_CONNECT_TIMEOUT * 1000 : self::EDIT_CONNECT_TIMEOUT;
+            // Preserve WordPress's configured CA bundle when restoring strict
+            // peer verification after another plugin's cURL hook.
+            if (isset($request['sslcertificates']) && is_string($request['sslcertificates']) && is_file($request['sslcertificates'])) {
+                $options[CURLOPT_CAINFO] = $request['sslcertificates'];
+            }
+            $ok = true;
+            foreach ($options as $option => $value) {
+                $set = curl_setopt($handle, $option, $value);
+                $ok = $set && $ok;
+            }
+            $diagnostics['curl_guard_ok'] = $ok;
+            $diagnostics['low_speed_guard_applied'] = $ok;
+            if ($ok) {
+                $diagnostics['effective_timeout_seconds'] = self::EDIT_TIMEOUT;
+                $diagnostics['connect_timeout_seconds'] = self::EDIT_CONNECT_TIMEOUT;
+            }
+        };
+        // WordPress maps Requests' documented before_request hook with these
+        // five reference parameters. Its verify option is applied AFTER the
+        // http_api_curl hook, so restore it here as well. The random multipart
+        // boundary identifies this owned request without reading/logging photos.
+        $requests_guard = static function (&$url, &$headers, &$data, &$method, &$options) use ($content_type, &$diagnostics, &$owned_handle, &$ca_bundle) {
+            if ($url !== self::ENDPOINT || strtoupper((string) $method) !== 'POST' || !is_iterable($headers) || !is_array($options)) { return; }
+            $matches = false;
+            foreach ($headers as $name => $value) {
+                if (is_string($name) && strtolower($name) === 'content-type' && $value === $content_type) { $matches = true; break; }
+            }
+            if (!$matches) { return; }
+            $options['timeout'] = self::EDIT_TIMEOUT;
+            $options['connect_timeout'] = self::EDIT_CONNECT_TIMEOUT;
+            $options['verify'] = $ca_bundle;
+            $options['verifyname'] = true;
+            $options['follow_redirects'] = false;
+            $options['redirects'] = 0;
+            $options['filename'] = false;
+            $options['max_bytes'] = self::MAX_RESPONSE_BYTES;
+            $diagnostics['requests_guard_applied'] = true;
+            $diagnostics['effective_timeout_seconds'] = self::EDIT_TIMEOUT;
+            $diagnostics['connect_timeout_seconds'] = self::EDIT_CONNECT_TIMEOUT;
+            if (isset($options['hooks']) && is_object($options['hooks']) && is_callable(array($options['hooks'], 'register')) && class_exists(\WpOrg\Requests\Exception::class)) {
+                // Requests otherwise retries curl_exec on encoding/write errors,
+                // including POST. Abort before that branch on this hook instance
+                // only, with a fixed message that contains no upstream content.
+                $options['hooks']->register('curl.after_send', static function () use (&$owned_handle, &$diagnostics) {
+                    if ($owned_handle === null || !function_exists('curl_errno')) { return; }
+                    $errno = curl_errno($owned_handle);
+                    $replay_errors = array();
+                    if (defined('CURLE_WRITE_ERROR')) { $replay_errors[] = CURLE_WRITE_ERROR; }
+                    if (defined('CURLE_BAD_CONTENT_ENCODING')) { $replay_errors[] = CURLE_BAD_CONTENT_ENCODING; }
+                    if (in_array($errno, $replay_errors, true)) {
+                        $diagnostics['replay_blocked'] = true;
+                        throw new \WpOrg\Requests\Exception('cURL error ' . (int) $errno . ': Response transfer failed; automatic POST replay was prevented.', 'vto_post_replay_blocked');
+                    }
+                });
+                $diagnostics['replay_guard_applied'] = true;
+            }
+        };
+        add_filter('http_request_args', $args_guard, PHP_INT_MAX, 2);
+        add_action('http_api_curl', $curl_guard, PHP_INT_MAX, 3);
+        add_action('requests-requests.before_request', $requests_guard, PHP_INT_MAX, 5);
+        try {
+            return wp_safe_remote_post(self::ENDPOINT, $args);
+        } finally {
+            remove_filter('http_request_args', $args_guard, PHP_INT_MAX);
+            remove_action('http_api_curl', $curl_guard, PHP_INT_MAX);
+            remove_action('requests-requests.before_request', $requests_guard, PHP_INT_MAX);
+        }
+    }
+
+    /** Append only locally produced numbers/booleans, never HTTP arguments. */
+    private static function with_transport_diagnostics($result, array $transport) {
+        if (!is_wp_error($result)) { return $result; }
+        $data = $result->get_error_data();
+        $data = is_array($data) ? $data : array();
+        $before = $transport['timeout_before_guard_seconds'] ?? null;
+        $effective = $transport['effective_timeout_seconds'] ?? null;
+        $detail = '; args_guard=' . (!empty($transport['args_guard_applied']) ? 'applied' : 'not-applied')
+            . '; timeout_before_guard_seconds=' . ($before === null ? 'unknown' : number_format($before, 2, '.', ''))
+            . '; effective_timeout_seconds=' . ($effective === null ? 'unknown' : (int) $effective)
+            . '; curl_guard=' . (!empty($transport['curl_guard_applied']) ? 'applied' : 'not-applied')
+            . '; curl_guard_ok=' . (!empty($transport['curl_guard_ok']) ? 'true' : 'false')
+            . '; connect_timeout_seconds=' . (($transport['connect_timeout_seconds'] ?? null) === null ? 'unknown' : (int) $transport['connect_timeout_seconds'])
+            . '; low_speed_guard=' . (!empty($transport['low_speed_guard_applied']) ? 'applied' : 'not-applied')
+            . '; requests_guard=' . (!empty($transport['requests_guard_applied']) ? 'applied' : 'not-applied')
+            . '; replay_guard=' . (!empty($transport['replay_guard_applied']) ? 'applied' : 'not-applied')
+            . '; replay_blocked=' . (!empty($transport['replay_blocked']) ? 'true' : 'false') . '.';
+        $data['detail'] = (isset($data['detail']) && is_string($data['detail']) ? $data['detail'] : 'AvalAI request failed.') . $detail;
+        $data['transport'] = $transport;
+        $result->add_data($data);
+        return $result;
     }
 
     /**

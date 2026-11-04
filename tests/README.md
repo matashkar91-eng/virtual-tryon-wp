@@ -35,3 +35,13 @@ VTO_WP_ROOT=/absolute/path/to/wordpress php tests/provider-results.php
 ```
 
 This suite intercepts every outbound HTTP request. It exercises standard base64 and URL image results, private signed-reference storage, result-download failures, GET-only recovery without a second paid generation, separate recovery limits, safe redirects and URL validation, invalid image responses, redacted unknown-response diagnostics, and reference-file cleanup. It does not validate the live provider account or undocumented response formats.
+
+The scoped generation-timeout guard has a separate suite:
+
+```sh
+VTO_WP_ROOT=/absolute/path/to/wordpress php tests/http-timeouts.php
+```
+
+It introduces a simulated third-party 30-second override, verifies the owned AvalAI POST restores its configured deadline, and checks that unrelated requests, model probes and requests without the private identity marker remain unchanged. It exercises the installed WordPress Requests bridge with all five reference arguments, iterable multipart headers, late transport options, per-request replay prevention, and cleanup of all three global hooks after success, errors and exceptions. Missing hook-manager capability and transports without cURL are checked separately so diagnostics do not overstate protection. With the cURL extension enabled, isolated namespace observers delegate option writes to native `curl_setopt` and record the values applied by the real WordPress cURL hook. A `curl_errno` observer simulates errors 23 and 61 to verify that the fixed Requests exception prevents reaching the replay branch on the owned hook instance. No `curl_exec` or live HTTP request occurs. This proves option application and hook behavior; it does not establish that a real hosting proxy allows a request to run longer than 30 seconds. Native and optional-constant checks are explicitly skipped when unavailable.
+
+Run the PHP suites sequentially: they temporarily change and restore the same disposable store settings.

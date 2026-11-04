@@ -310,8 +310,24 @@ final class Admin {
         exit;
     }
 
-    private static function job_button($id, $action, $label) {
-        ?><form action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post" class="vto-job-action"><input type="hidden" name="action" value="vto_job_action"><input type="hidden" name="job_id" value="<?php echo absint($id); ?>"><input type="hidden" name="job_action" value="<?php echo esc_attr($action); ?>"><?php wp_nonce_field('vto_job_' . $action . '_' . $id); ?><button class="button button-small<?php echo $action === 'delete' ? ' vto-delete-job' : ''; ?>" type="submit"><?php echo esc_html($label); ?></button></form><?php
+    private static function job_button($id, $action, $label, $confirm_paid_retry = false) {
+        ?><form action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post" class="vto-job-action"><input type="hidden" name="action" value="vto_job_action"><input type="hidden" name="job_id" value="<?php echo absint($id); ?>"><input type="hidden" name="job_action" value="<?php echo esc_attr($action); ?>"><?php wp_nonce_field('vto_job_' . $action . '_' . $id); ?><button class="button button-small<?php echo $action === 'delete' ? ' vto-delete-job' : ($confirm_paid_retry ? ' vto-retry-job' : ''); ?>" type="submit"><?php echo esc_html($label); ?></button></form><?php
+    }
+
+    /** A failed live request may have reached the provider before its result was lost. */
+    private static function uncertain_billing_outcome(array $job) {
+        $code = isset($job['error_code']) ? sanitize_key($job['error_code']) : '';
+        $uncertain_codes = array(
+            'vto_provider_timeout', 'vto_provider_transport', 'vto_provider_dns',
+            'vto_provider_connect', 'vto_provider_tls', 'vto_provider_blocked',
+            'vto_provider_response_size', 'vto_provider_format', 'vto_provider_pending',
+            'vto_provider_image', 'vto_provider_result_url', 'vto_provider_reference',
+            'vto_provider_unavailable', 'worker_interrupted', 'worker_error',
+        );
+        return isset($job['status']) && 'failed' === $job['status']
+            && isset($job['mode']) && 'avalai' === $job['mode']
+            && empty($job['reference_path'])
+            && in_array($code, $uncertain_codes, true);
     }
 
     public static function jobs_page() {
@@ -326,7 +342,7 @@ final class Admin {
             <p class="vto-warning">«ساخت دوباره» می‌تواند اعتبار API مصرف کند. «دریافت دوبارهٔ نتیجه» فقط دریافت خروجی قبلی را امتحان می‌کند و درخواست ساخت جدید نمی‌فرستد. حذف، فایل‌های محلی را پاک می‌کند و درخواست ارسال‌شده به سرویس بیرونی را پس نمی‌گیرد.</p>
             <div class="vto-jobs-scroll"><table class="widefat striped vto-jobs-table"><thead><tr><th>شناسه / محصول</th><th>وضعیت / زمان</th><th>عکس‌ها</th><th>جزئیات و خطا</th><th>عملیات</th></tr></thead><tbody>
             <?php if (!$jobs) : ?><tr><td colspan="5">هنوز درخواستی ثبت نشده است. از برگهٔ پرو یک درخواست آزمایشی بسازید.</td></tr><?php endif; ?>
-            <?php foreach ($jobs as $job) : $job = (array) $job; $id = absint($job['id']); $status = isset($job['status']) ? $job['status'] : ''; ?>
+            <?php foreach ($jobs as $job) : $job = (array) $job; $id = absint($job['id']); $status = isset($job['status']) ? $job['status'] : ''; $uncertain_billing = self::uncertain_billing_outcome($job); ?>
                 <tr><td><strong>#<?php echo $id; ?></strong><br><?php echo esc_html(isset($job['product_name']) ? $job['product_name'] : ''); ?></td><td><span class="vto-status vto-status-<?php echo esc_attr(sanitize_html_class($status)); ?>"><?php echo esc_html(isset($status_names[$status]) ? $status_names[$status] : $status); ?></span><br><time dir="ltr"><?php echo esc_html(isset($job['created_at']) ? $job['created_at'] : ''); ?> UTC</time><br><small>تعداد تلاش: <?php echo absint(isset($job['attempts']) ? $job['attempts'] : 0); ?></small></td><td>
                 <?php foreach (array('input' => 'عکس ورودی', 'output' => 'تصویر خروجی') as $kind => $label) : if (empty($job[$kind . '_path'])) { continue; } $image_url = add_query_arg(array('kind' => $kind, '_wpnonce' => wp_create_nonce('wp_rest')), rest_url('vto/v1/admin/jobs/' . $id . '/image')); ?>
                     <a class="vto-job-image" target="_blank" rel="noopener noreferrer" href="<?php echo esc_url($image_url); ?>"><img loading="lazy" src="<?php echo esc_url($image_url); ?>" alt="<?php echo esc_attr($label); ?>"><span><?php echo esc_html($label); ?></span></a>
@@ -334,13 +350,14 @@ final class Admin {
                     <?php if (!empty($job['error_code'])) : ?><code dir="ltr"><?php echo esc_html($job['error_code']); ?></code><br><?php endif; ?>
                     <?php echo esc_html(isset($job['error_message']) ? $job['error_message'] : ''); ?>
                     <?php if ($status === 'failed' && !empty($job['reference_path'])) : ?><p class="description">سرویس برای این درخواست نشانیِ نتیجه برگردانده و مرجع آن به‌صورت خصوصی ذخیره شده است. اگر لینک هنوز معتبر و منقضی‌نشده باشد، می‌توانید با «دریافت دوبارهٔ نتیجه» آن را بدون ساخت تصویر جدید دریافت کنید.</p><?php endif; ?>
+                    <?php if ($uncertain_billing) : ?><p class="description"><strong>هشدار هزینه:</strong> قطع ارتباط یا پاسخ ناقص ثابت نمی‌کند ساخت انجام نشده است. پیش از «ساخت دوباره»، تاریخچه و مصرف همین درخواست را در AvalAI بررسی کنید؛ اصلاح زمان انتظار نتیجهٔ قبلی را بازیابی نمی‌کند.</p><?php endif; ?>
                     <?php if (!empty($job['error_detail'])) : ?><details><summary>جزئیات فنی خطا برای مدیر</summary><pre class="vto-diagnostic" dir="auto"><?php echo esc_html($job['error_detail']); ?></pre></details><?php endif; ?>
                     <?php if (!empty($job['provider_request_id'])) : ?><br><small>شناسهٔ سرویس: <code dir="ltr"><?php echo esc_html($job['provider_request_id']); ?></code></small><?php endif; ?>
                     <details><summary>تنظیمات هنگام ثبت درخواست</summary><dl class="vto-job-snapshot"><dt>حالت اجرا</dt><dd><?php echo isset($job['mode']) && $job['mode'] === 'avalai' ? 'واقعی؛ AvalAI' : 'آزمایشی؛ بدون ساخت تصویر واقعی'; ?></dd><dt>مدل</dt><dd><code dir="ltr"><?php echo esc_html(isset($job['model']) ? $job['model'] : ''); ?></code></dd><dt>پرامپت ارسال‌شده</dt><dd><pre class="vto-diagnostic" dir="auto"><?php echo esc_html(isset($job['prompt']) ? $job['prompt'] : ''); ?></pre></dd></dl><p class="description">تلاش دوباره از همین حالت، مدل و پرامپت ذخیره‌شده استفاده می‌کند. برای آزمایش تنظیمات جدید، یک درخواست تازه بسازید.</p></details>
-                    </td><td><?php if ($status === 'failed' && !empty($job['reference_path'])) { self::job_button($id, 'recover', 'دریافت دوبارهٔ نتیجه (بدون ساخت جدید)'); } if ($status === 'failed' && empty($job['reference_path'])) { self::job_button($id, 'retry', 'ساخت دوبارهٔ تصویر (احتمال مصرف اعتبار)'); } self::job_button($id, 'delete', 'حذف عکس‌ها و درخواست'); ?></td></tr>
+                    </td><td><?php if ($status === 'failed' && !empty($job['reference_path'])) { self::job_button($id, 'recover', 'دریافت دوبارهٔ نتیجه (بدون ساخت جدید)'); } if ($status === 'failed' && empty($job['reference_path'])) { self::job_button($id, 'retry', 'ساخت دوبارهٔ تصویر (احتمال مصرف اعتبار)', isset($job['mode']) && 'avalai' === $job['mode']); } self::job_button($id, 'delete', 'حذف عکس‌ها و درخواست'); ?></td></tr>
             <?php endforeach; ?>
             </tbody></table></div><p class="description">برای تازه‌کردن وضعیت، صفحه را بازخوانی کنید. زمان‌ها بر حسب UTC هستند. خطاهای سرویس به شکل پاک‌سازی‌شده نمایش داده می‌شوند؛ کلید API و محتوای حساس پاسخ ذخیره نمی‌شود.</p>
-        </div><script>document.querySelectorAll('.vto-delete-job').forEach(function(button){button.addEventListener('click',function(event){if(!window.confirm('درخواست و عکس‌های محلی آن برای همیشه حذف شوند؟')){event.preventDefault();}});});</script>
+        </div><script>document.querySelectorAll('.vto-delete-job').forEach(function(button){button.addEventListener('click',function(event){if(!window.confirm('درخواست و عکس‌های محلی آن برای همیشه حذف شوند؟')){event.preventDefault();}});});document.querySelectorAll('.vto-retry-job').forEach(function(button){button.addEventListener('click',function(event){if(!window.confirm('این عمل یک درخواست ساخت تصویر جدید به AvalAI می‌فرستد و ممکن است دوباره هزینه داشته باشد. آیا تاریخچه و مصرف درخواست قبلی را بررسی کرده‌اید و می‌خواهید ادامه دهید؟')){event.preventDefault();}});});</script>
         <?php
     }
 }

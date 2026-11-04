@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.4
+Stable tag: 0.1.5
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -27,7 +27,20 @@ before enabling live use.
 AvalAI multi-image endpoint/model compatibility has NOT been live verified.
 Demo returns the original photo and does not change garments or accessories.
 
+== Upgrade Notice ==
+= 0.1.5 =
+After confirming version 0.1.5 is active, deactivate only the temporary AvalAI
+timeout workaround if you added it in Code Snippets. Existing failed jobs are not
+resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
+
 == Changelog ==
+= 0.1.5 =
+Enforce the configured edit timeout at both WordPress HTTP and cURL layers,
+only while the single AvalAI image-edit request is active. Disable cURL's
+low-speed abort for that request and record safe guard diagnostics on failure.
+Keep TLS verification and redirects locked down, and never retry a paid edit
+automatically. External hosting or upstream time limits can still apply.
+
 = 0.1.4 =
 Accept standard base64 and HTTPS image-URL results with safe bounded downloads.
 Keep result references privately for GET-only recovery without regenerating.

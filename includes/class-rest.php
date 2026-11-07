@@ -55,6 +55,11 @@ final class Rest {
             'permission_callback' => static function () { return current_user_can('manage_options'); },
             'callback' => [self::class, 'admin_image'],
         ]);
+        register_rest_route('vto/v1', '/admin/jobs/(?P<id>\d+)/provider-image', [
+            'methods' => 'GET',
+            'permission_callback' => static function () { return current_user_can('manage_options'); },
+            'callback' => [self::class, 'admin_provider_image'],
+        ]);
     }
 
     public static function can_create(\WP_REST_Request $request) {
@@ -106,15 +111,18 @@ final class Rest {
     public static function status(\WP_REST_Request $request) {
         $job = Jobs::by_token($request['token']);
         if (!$job) { return new \WP_Error('not_found', 'درخواست موجود نیست یا زمان نگهداری آن پایان یافته است.', ['status' => 404]); }
+        $remote_ready = !is_wp_error(self::provider_reference($job));
+        $public_status = $remote_ready ? 'completed' : $job['status'];
         $messages = [
             'queued' => 'درخواست در صف است. می‌توانید بعداً با همین لینک نتیجه را ببینید.',
             'processing' => 'تصویر در حال پردازش است؛ این صفحه را دوباره ارسال نکنید.',
             'completed' => $job['mode'] === 'demo' ? 'آزمایش مسیر انجام شد؛ این تصویر اصلی شماست و پرو واقعی انجام نشده است.' : 'تصویر آماده است.',
             'failed' => $job['error_message'],
         ];
-        $image = $job['status'] === 'completed' ? rest_url('vto/v1/jobs/' . $request['token'] . '/image') : null;
+        if ($remote_ready) { $messages['completed'] = 'تصویر در سرویس آماده است و مستقیماً در مرورگر شما دریافت می‌شود.'; }
+        $image = $public_status === 'completed' ? rest_url('vto/v1/jobs/' . $request['token'] . '/image') : null;
         return self::response([
-            'status' => $job['status'], 'message' => $messages[$job['status']] ?? '',
+            'status' => $public_status, 'message' => $messages[$public_status] ?? '',
             'mode' => $job['mode'], 'image_url' => $image, 'error_code' => $job['error_code'],
             'expires_at' => gmdate('c', strtotime($job['expires_at'] . ' UTC')),
         ]);
@@ -122,7 +130,10 @@ final class Rest {
 
     public static function image(\WP_REST_Request $request) {
         $job = Jobs::by_token($request['token']);
-        if (!$job || $job['status'] !== 'completed') { return new \WP_Error('not_found', 'تصویر موجود نیست یا منقضی شده است.', ['status' => 404]); }
+        if (!$job) { return new \WP_Error('not_found', 'تصویر موجود نیست یا منقضی شده است.', ['status' => 404]); }
+        $reference = self::provider_reference($job);
+        if (!is_wp_error($reference)) { return self::provider_redirect($reference); }
+        if ($job['status'] !== 'completed') { return new \WP_Error('not_found', 'تصویر موجود نیست یا منقضی شده است.', ['status' => 404]); }
         return self::stream($job['output_path'], !empty($request['download']));
     }
 
@@ -130,6 +141,39 @@ final class Rest {
         $job = Jobs::by_id(absint($request['id']));
         if (!$job || $job['expires_at'] <= gmdate('Y-m-d H:i:s')) { return new \WP_Error('not_found', 'تصویر موجود نیست یا منقضی شده است.', ['status' => 404]); }
         return self::stream($request['kind'] === 'output' ? $job['output_path'] : $job['input_path'], false);
+    }
+
+    public static function admin_provider_image(\WP_REST_Request $request) {
+        $job = Jobs::by_id(absint($request['id']));
+        if (!$job) { return new \WP_Error('not_found', 'خروجی مستقیم موجود نیست یا منقضی شده است.', ['status' => 404]); }
+        $reference = self::provider_reference($job);
+        return is_wp_error($reference) ? $reference : self::provider_redirect($reference);
+    }
+
+    /** A tracking token or administrator authorization is required before this is called. */
+    private static function provider_reference(array $job) {
+        if (($job['status'] ?? '') !== 'failed' || empty($job['reference_path'])
+            || ($job['expires_at'] ?? '') <= gmdate('Y-m-d H:i:s')) {
+            return new \WP_Error('not_found', 'خروجی مستقیم موجود نیست یا منقضی شده است.', ['status' => 404]);
+        }
+        $url = Storage::read_reference((string) $job['reference_path']);
+        if (is_wp_error($url) || !Provider_Result::valid_reference_url((string) $url)) {
+            return new \WP_Error('not_found', 'خروجی مستقیم موجود نیست یا منقضی شده است.', ['status' => 404]);
+        }
+        return $url;
+    }
+
+    /** Let the authorized browser fetch the existing signed result when the host cannot. */
+    private static function provider_redirect(string $url): \WP_REST_Response {
+        $response = new \WP_REST_Response(null, 302);
+        $response->header('Location', $url);
+        $response->header('Cache-Control', 'private, no-store, max-age=0');
+        $response->header('Pragma', 'no-cache');
+        $response->header('Expires', '0');
+        $response->header('Referrer-Policy', 'no-referrer');
+        $response->header('X-Robots-Tag', 'noindex, nofollow, noarchive');
+        $response->header('X-Content-Type-Options', 'nosniff');
+        return $response;
     }
 
     private static function stream(string $path, bool $download) {

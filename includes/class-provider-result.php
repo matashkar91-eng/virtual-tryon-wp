@@ -12,6 +12,11 @@ final class Provider_Result {
     const DOWNLOAD_TIMEOUT = 110;
     const DOWNLOAD_CONNECT_TIMEOUT = 20;
 
+    /** Validate a saved provider reference without downloading its contents. */
+    public static function valid_reference_url(string $url): bool {
+        return self::safe_url($url);
+    }
+
     /** @return array|\WP_Error Verified bytes/MIME, optionally a private recovery path. */
     public static function decode($response, array $job) {
         $status = (int) wp_remote_retrieve_response_code($response);

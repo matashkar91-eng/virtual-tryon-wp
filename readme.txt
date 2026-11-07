@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,11 @@ quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.2.1 =
+When the host cannot download an already-generated signed result, the authorized
+customer or administrator can open that same result directly in their browser.
+The fallback does not submit another generation request.
+
 = 0.2.0 =
 The saved-result downloader now restores its 110-second deadline at the final
 WordPress, Requests and native cURL layers. Recovery remains a non-billable GET.
@@ -62,6 +67,14 @@ timeout workaround if you added it in Code Snippets. Existing failed jobs are no
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.2.1 =
+Add a browser-direct fallback for saved provider results when server egress to
+the image CDN times out. Keep the signed URL out of status JSON and HTML; expose
+only a same-origin capability route that revalidates the private reference and
+returns a no-store, no-referrer redirect. Add a separate administrator-only
+direct-result route and button. Preserve the failed database state for audit and
+perform no provider POST, server-side result GET or request-counter mutation.
+
 = 0.2.0 =
 Add a temporary, request-scoped transport guard for generated-result downloads.
 Restore the bounded timeout, connection deadline, TLS checks, response byte cap,

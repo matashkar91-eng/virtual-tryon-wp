@@ -299,6 +299,76 @@ namespace {
         $probe = VTO\Provider::check_connection();
         timeout_check(is_wp_error($probe) && $http_calls === $before_calls + 1 && timeout_hook_ids() === $baseline_hooks, 'Read-only model probe remains outside generation guard and does not leak hooks');
         timeout_check($observed_probe_args['timeout'] === VTO\Provider::PROBE_TIMEOUT && $observed_probe_args['method'] === 'GET' && empty($observed_probe_args['_vto_edit_guard']) && $probe_hook_state === $baseline_hooks, 'Read-only model probe retains its own short deadline without generation hooks');
+
+        // Reproduce the production failure where a late hook resets a saved
+        // result GET to 30 seconds after the plugin requested 110 seconds.
+        remove_filter('http_request_args', $poison, 100);
+        remove_filter('pre_http_request', $intercept, PHP_INT_MAX);
+        $poison = null;
+        $intercept = null;
+        $result_baseline_hooks = timeout_hook_ids();
+        $result_url = 'https://1.1.1.1/vto-timeout-result.png';
+        $result_poison = static function ($args, $url) use ($result_url) {
+            if ($url === $result_url && strtoupper($args['method'] ?? '') === 'GET') {
+                $args['timeout'] = 30;
+                $args['sslverify'] = false;
+                $args['redirection'] = 4;
+                $args['reject_unsafe_urls'] = false;
+                $args['stream'] = true;
+                $args['filename'] = '/tmp/unwanted-result-stream';
+                $args['limit_response_size'] = 17;
+            }
+            return $args;
+        };
+        add_filter('http_request_args', $result_poison, 100, 2);
+        $result_behavior = 'success';
+        $result_args = [];
+        $result_requests_options = [];
+        $result_native_options = [];
+        $result_scope_safe = false;
+        $result_intercept = static function ($pre, $args, $url) use ($result_url, &$result_behavior, &$result_args, &$result_requests_options, &$result_native_options, &$result_scope_safe, &$handles, $png) {
+            if ($url !== $result_url) { return new WP_Error('unexpected_result_url'); }
+            $result_args = $args;
+            $marker = $args['_vto_result_guard'] ?? '';
+            $foreign = apply_filters('http_request_args', ['timeout'=>7, 'method'=>'GET', '_vto_result_guard'=>$marker], 'https://example.invalid/unrelated-result.png');
+            $missing = apply_filters('http_request_args', ['timeout'=>7, 'method'=>'GET'], $result_url);
+            $result_scope_safe = $foreign['timeout'] === 7 && $missing['timeout'] === 30;
+            $bridge = new WP_HTTP_Requests_Hooks($url, $args);
+            $requests_url = $url;
+            $requests_headers = new \WpOrg\Requests\Utility\CaseInsensitiveDictionary($args['headers']);
+            $requests_data = '';
+            $requests_method = 'GET';
+            $requests_options = ['timeout'=>30, 'connect_timeout'=>1, 'verify'=>false, 'verifyname'=>false, 'follow_redirects'=>true, 'redirects'=>4, 'max_bytes'=>17, 'filename'=>'unwanted'];
+            $bridge->dispatch('requests.before_request', [&$requests_url, &$requests_headers, &$requests_data, &$requests_method, &$requests_options]);
+            $result_requests_options = $requests_options;
+            if (function_exists('curl_init')) {
+                $GLOBALS['vto_timeout_native_writes'] = [];
+                $handle = \curl_init();
+                $handles[] = $handle;
+                \curl_setopt_array($handle, [CURLOPT_TIMEOUT=>30, CURLOPT_CONNECTTIMEOUT=>2, CURLOPT_LOW_SPEED_LIMIT=>1, CURLOPT_LOW_SPEED_TIME=>30, CURLOPT_SSL_VERIFYPEER=>false, CURLOPT_SSL_VERIFYHOST=>0, CURLOPT_FOLLOWLOCATION=>true]);
+                $bridge->dispatch('curl.before_send', [&$handle]);
+                $result_native_options = timeout_native_options($handle);
+            }
+            if ($result_behavior === 'error') { return new WP_Error('http_request_failed', 'cURL error 28: private result details'); }
+            return ['headers'=>['content-type'=>'image/png'], 'response'=>['code'=>200, 'message'=>'OK'], 'body'=>$png, 'cookies'=>[]];
+        };
+        add_filter('pre_http_request', $result_intercept, PHP_INT_MAX, 3);
+        $result = VTO\Provider_Result::fetch($result_url);
+        timeout_check(!is_wp_error($result) && $result['bytes'] === $png, 'Saved result GET retains normal image download behavior');
+        timeout_check($result_args['timeout'] === VTO\Provider_Result::DOWNLOAD_TIMEOUT && $result_args['sslverify'] === true && $result_args['redirection'] === 0 && $result_args['stream'] === false && $result_args['limit_response_size'] === VTO\Provider_Result::MAX_IMAGE_BYTES + 1, 'Result argument guard restores the 110-second deadline and safe download bounds after a 30-second override');
+        timeout_check($result_requests_options['timeout'] === VTO\Provider_Result::DOWNLOAD_TIMEOUT && $result_requests_options['connect_timeout'] === VTO\Provider_Result::DOWNLOAD_CONNECT_TIMEOUT && $result_requests_options['verifyname'] === true && $result_requests_options['follow_redirects'] === false, 'Result Requests guard restores timeout, connection and TLS options');
+        if ($result_native_options) {
+            timeout_check(timeout_native_value($result_native_options, 'CURLOPT_TIMEOUT_MS') === VTO\Provider_Result::DOWNLOAD_TIMEOUT * 1000 || timeout_native_value($result_native_options, 'CURLOPT_TIMEOUT') === VTO\Provider_Result::DOWNLOAD_TIMEOUT, 'Result native cURL guard restores the 110-second deadline');
+            timeout_check(timeout_native_value($result_native_options, 'CURLOPT_LOW_SPEED_LIMIT') === 0 && timeout_native_value($result_native_options, 'CURLOPT_LOW_SPEED_TIME') === 0, 'Result native cURL guard disables the hidden 30-second low-speed abort');
+        }
+        timeout_check($result_scope_safe, 'Result guard ignores unrelated URLs and requests without its private marker');
+        $result_hooks_during_filters = timeout_hook_ids();
+        $result_behavior = 'error';
+        $result_error = VTO\Provider_Result::fetch($result_url);
+        timeout_check(is_wp_error($result_error) && timeout_hook_ids() === $result_hooks_during_filters, 'Result guard removes every temporary hook after a transport failure');
+        remove_filter('http_request_args', $result_poison, 100);
+        remove_filter('pre_http_request', $result_intercept, PHP_INT_MAX);
+        timeout_check(timeout_hook_ids() === $result_baseline_hooks, 'Result timeout test leaves no HTTP hooks behind');
         echo "\n$passed timeout-guard assertions passed. No curl_exec or live HTTP call occurred.\n";
     } catch (\Throwable $error) {
         fwrite(STDERR, 'FAIL '.$error->getMessage().PHP_EOL);

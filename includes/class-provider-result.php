@@ -10,6 +10,7 @@ final class Provider_Result {
     // Image CDNs can take longer than WordPress's common 30-second default
     // after a generation has completed. This GET never submits a new edit.
     const DOWNLOAD_TIMEOUT = 110;
+    const DOWNLOAD_CONNECT_TIMEOUT = 20;
 
     /** @return array|\WP_Error Verified bytes/MIME, optionally a private recovery path. */
     public static function decode($response, array $job) {
@@ -93,18 +94,19 @@ final class Provider_Result {
             }
             // Redirects are followed manually so every destination remains HTTPS
             // and each GET starts without authentication or inherited cookies.
-            $response = wp_safe_remote_get($url, array(
+            $download_transport = array();
+            $response = self::result_request($url, array(
                 'timeout' => max(1, $remaining), 'redirection' => 0, 'sslverify' => true,
                 'reject_unsafe_urls' => true, 'limit_response_size' => self::MAX_IMAGE_BYTES + 1,
                 'cookies' => array(), 'headers' => array('Accept' => 'image/png,image/jpeg,image/webp'),
-            ));
+            ), max(1, (int) ceil($remaining)), $download_transport);
             if (is_wp_error($response)) {
                 $detail = 'Result download transport failure';
                 if (preg_match('/\bcURL\s+error\s+([0-9]{1,3})\b/i', $response->get_error_message(), $match)) {
                     $detail .= '; cURL error ' . (int) $match[1];
                 }
                 $elapsed = max(0.0, self::clock() - $started);
-                return self::download_error($detail . '; elapsed_seconds=' . number_format($elapsed, 2, '.', '') . '; configured_timeout_seconds=' . self::DOWNLOAD_TIMEOUT . '.');
+                return self::download_error($detail . '; elapsed_seconds=' . number_format($elapsed, 2, '.', '') . '; configured_timeout_seconds=' . self::DOWNLOAD_TIMEOUT . self::transport_detail($download_transport));
             }
             $status = (int) wp_remote_retrieve_response_code($response);
             if (in_array($status, array(301, 302, 303, 307, 308), true)) {
@@ -126,6 +128,109 @@ final class Provider_Result {
             return $image;
         }
         return self::download_error('Result download redirect limit reached.');
+    }
+
+    /** Restore safe transport options after late third-party hooks for one result GET. */
+    private static function result_request(string $url, array $args, int $timeout, array &$diagnostics) {
+        $marker = bin2hex(random_bytes(16));
+        $timeout = max(1, min(self::DOWNLOAD_TIMEOUT, $timeout));
+        $args['method'] = 'GET';
+        $args['_vto_result_guard'] = $marker;
+        $default_ca = ABSPATH . WPINC . '/certificates/ca-bundle.crt';
+        $ca_bundle = is_file($default_ca) ? $default_ca : true;
+        $diagnostics = array(
+            'args_guard_applied' => false, 'curl_guard_applied' => false, 'curl_guard_ok' => false,
+            'requests_guard_applied' => false, 'effective_timeout_seconds' => null,
+            'connect_timeout_seconds' => null, 'low_speed_guard_applied' => false,
+        );
+        $owns = static function ($request, $target) use ($url, $marker) {
+            return $target === $url && is_array($request)
+                && strtoupper((string) ($request['method'] ?? '')) === 'GET'
+                && isset($request['_vto_result_guard']) && is_string($request['_vto_result_guard'])
+                && hash_equals($marker, $request['_vto_result_guard']);
+        };
+        $args_guard = static function ($request, $target) use ($owns, $timeout, &$diagnostics, &$ca_bundle) {
+            if (!$owns($request, $target)) { return $request; }
+            $request['timeout'] = $timeout;
+            $request['redirection'] = 0;
+            $request['sslverify'] = true;
+            if (isset($request['sslcertificates']) && is_string($request['sslcertificates']) && is_file($request['sslcertificates'])) { $ca_bundle = $request['sslcertificates']; }
+            $request['reject_unsafe_urls'] = true;
+            $request['blocking'] = true;
+            $request['stream'] = false;
+            $request['filename'] = null;
+            $request['limit_response_size'] = self::MAX_IMAGE_BYTES + 1;
+            $request['cookies'] = array();
+            if (is_string($request['headers'] ?? null)) {
+                $processed = \WP_Http::processHeaders($request['headers']);
+                $request['headers'] = $processed['headers'];
+            }
+            if (is_array($request['headers'] ?? null)) {
+                foreach (array_keys($request['headers']) as $name) {
+                    if (is_string($name) && in_array(strtolower($name), array('accept', 'accept-encoding', 'authorization', 'cookie'), true)) { unset($request['headers'][$name]); }
+                }
+                $request['headers']['Accept'] = 'image/png,image/jpeg,image/webp';
+                $request['headers']['Accept-Encoding'] = 'identity';
+            }
+            $diagnostics['args_guard_applied'] = true;
+            $diagnostics['effective_timeout_seconds'] = $timeout;
+            return $request;
+        };
+        $curl_guard = static function ($handle, $request, $target) use ($owns, $timeout, &$diagnostics) {
+            if (!$owns($request, $target) || !function_exists('curl_setopt')) { return; }
+            $diagnostics['curl_guard_applied'] = true;
+            $connect = min(self::DOWNLOAD_CONNECT_TIMEOUT, $timeout);
+            $options = array(
+                CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_FOLLOWLOCATION => false, CURLOPT_MAXREDIRS => 0,
+                CURLOPT_LOW_SPEED_LIMIT => 0, CURLOPT_LOW_SPEED_TIME => 0,
+                CURLOPT_ENCODING => 'identity',
+            );
+            if (defined('CURLOPT_HTTP_CONTENT_DECODING')) { $options[CURLOPT_HTTP_CONTENT_DECODING] = false; }
+            $options[defined('CURLOPT_TIMEOUT_MS') ? CURLOPT_TIMEOUT_MS : CURLOPT_TIMEOUT] = defined('CURLOPT_TIMEOUT_MS') ? $timeout * 1000 : $timeout;
+            $options[defined('CURLOPT_CONNECTTIMEOUT_MS') ? CURLOPT_CONNECTTIMEOUT_MS : CURLOPT_CONNECTTIMEOUT] = defined('CURLOPT_CONNECTTIMEOUT_MS') ? $connect * 1000 : $connect;
+            if (isset($request['sslcertificates']) && is_string($request['sslcertificates']) && is_file($request['sslcertificates'])) { $options[CURLOPT_CAINFO] = $request['sslcertificates']; }
+            $ok = true;
+            foreach ($options as $option => $value) { $ok = curl_setopt($handle, $option, $value) && $ok; }
+            $diagnostics['curl_guard_ok'] = $ok;
+            $diagnostics['low_speed_guard_applied'] = $ok;
+            if ($ok) { $diagnostics['effective_timeout_seconds'] = $timeout; $diagnostics['connect_timeout_seconds'] = $connect; }
+        };
+        $requests_guard = static function (&$target, &$headers, &$data, &$method, &$options) use ($url, $timeout, &$diagnostics, &$ca_bundle) {
+            if ($target !== $url || strtoupper((string) $method) !== 'GET' || !is_array($options)) { return; }
+            $connect = min(self::DOWNLOAD_CONNECT_TIMEOUT, $timeout);
+            $options['timeout'] = $timeout;
+            $options['connect_timeout'] = $connect;
+            $options['verify'] = $ca_bundle;
+            $options['verifyname'] = true;
+            $options['follow_redirects'] = false;
+            $options['redirects'] = 0;
+            $options['filename'] = false;
+            $options['max_bytes'] = self::MAX_IMAGE_BYTES + 1;
+            $diagnostics['requests_guard_applied'] = true;
+            $diagnostics['effective_timeout_seconds'] = $timeout;
+            $diagnostics['connect_timeout_seconds'] = $connect;
+        };
+        add_filter('http_request_args', $args_guard, PHP_INT_MAX, 2);
+        add_action('http_api_curl', $curl_guard, PHP_INT_MAX, 3);
+        add_action('requests-requests.before_request', $requests_guard, PHP_INT_MAX, 5);
+        try {
+            return wp_safe_remote_get($url, $args);
+        } finally {
+            remove_filter('http_request_args', $args_guard, PHP_INT_MAX);
+            remove_action('http_api_curl', $curl_guard, PHP_INT_MAX);
+            remove_action('requests-requests.before_request', $requests_guard, PHP_INT_MAX);
+        }
+    }
+
+    private static function transport_detail(array $transport): string {
+        return '; args_guard=' . (!empty($transport['args_guard_applied']) ? 'applied' : 'not-applied')
+            . '; effective_timeout_seconds=' . (isset($transport['effective_timeout_seconds']) ? (int) $transport['effective_timeout_seconds'] : 'unknown')
+            . '; curl_guard=' . (!empty($transport['curl_guard_applied']) ? 'applied' : 'not-applied')
+            . '; curl_guard_ok=' . (!empty($transport['curl_guard_ok']) ? 'true' : 'false')
+            . '; requests_guard=' . (!empty($transport['requests_guard_applied']) ? 'applied' : 'not-applied')
+            . '; connect_timeout_seconds=' . (isset($transport['connect_timeout_seconds']) ? (int) $transport['connect_timeout_seconds'] : 'unknown')
+            . '; low_speed_guard=' . (!empty($transport['low_speed_guard_applied']) ? 'applied' : 'not-applied') . '.';
     }
 
     private static function safe_url(string $url): bool {

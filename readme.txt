@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.8
+Stable tag: 0.1.9
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,11 @@ quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.1.9 =
+Downloading an already-generated provider result now has a 110-second budget
+instead of 30 seconds. Recovery still uses only the saved result URL and never
+submits or bills a new image generation.
+
 = 0.1.8 =
 Administrators can run an existing queued request directly from request history
 when the host's WP-Cron runner is unavailable. This runs the same request and
@@ -53,6 +58,11 @@ timeout workaround if you added it in Code Snippets. Existing failed jobs are no
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.1.9 =
+Increase the bounded, non-billable result-download window to 110 seconds for
+slow image CDNs. Keep the saved private recovery reference and add safe elapsed
+time diagnostics when a result GET still times out.
+
 = 0.1.8 =
 Add an authenticated, nonce-protected "run now" action for queued requests. It
 lets the store administrator process the same queued row without hosting access,

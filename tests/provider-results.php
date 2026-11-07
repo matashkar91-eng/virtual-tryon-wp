@@ -87,6 +87,7 @@ try {
     result_check(VTO\Storage::owns($row['output_path']) && file_get_contents($row['output_path'])===$png, 'Downloaded provider image is saved in private storage');
     result_check(strtoupper($get_arguments['method']??'GET')==='GET' && empty($get_arguments['headers']['Authorization']) && empty($get_arguments['headers']['Cookie']) && empty($get_arguments['cookies']), 'Result GET sends neither provider authorization nor cookies');
     result_check(!empty($get_arguments['sslverify']) && !empty($get_arguments['reject_unsafe_urls']) && $get_arguments['redirection']<=3 && $get_arguments['limit_response_size']<=VTO\Provider::MAX_IMAGE_BYTES+1, 'Result download preserves TLS and bounds redirects and response bytes');
+    result_check($get_arguments['timeout'] > 30 && $get_arguments['timeout'] <= VTO\Provider_Result::DOWNLOAD_TIMEOUT, 'Result download is not cut off by the previous 30-second deadline');
     $status_request=new WP_REST_Request('GET','/vto/v1/jobs/'.$first['token']);$status_request['token']=$first['token'];
     $public=VTO\Rest::status($status_request)->get_data();
     result_check(!str_contains(wp_json_encode($public),'PRIVATE_RESULT_SIGNATURE') && !array_key_exists('reference_path',$public), 'Public job status never exposes signed result URL or private reference path');
@@ -137,6 +138,10 @@ try {
     $download_mode='image';
     $decoded=VTO\Provider_Result::decode(response_fixture(['data'=>[['b64_json'=>base64_encode($png)]]]),[]);
     result_check(!is_wp_error($decoded) && $decoded['bytes']===$png, 'Legacy b64_json image response remains supported');
+    $before_schema_get=$get_count;
+    $avalai_url_result=VTO\Provider_Result::decode(response_fixture(['data'=>[['b64_json'=>'','revised_prompt'=>'safe test prompt','url'=>$url]]]),[]);
+    result_check(!is_wp_error($avalai_url_result) && $avalai_url_result['bytes']===$png && $get_count===$before_schema_get+1, 'AvalAI empty base64 plus URL response downloads the existing result with one GET');
+    if(!is_wp_error($avalai_url_result) && !empty($avalai_url_result['recovery_path'])){VTO\Storage::delete($avalai_url_result['recovery_path']);}
     $unknown=VTO\Provider_Result::decode(response_fixture(['secret_token'=>'TOP_SECRET_VALUE','customer_photo'=>'RAW_PHOTO_BYTES','extra'=>['token'=>'NESTED_SECRET']]),[]);
     result_check(is_wp_error($unknown), 'Unknown successful response schema is diagnosed rather than treated as completion');
     $unknown_diagnostic=wp_json_encode([$unknown->get_error_message(),$unknown->get_error_data()]);

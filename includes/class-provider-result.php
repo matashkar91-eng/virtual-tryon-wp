@@ -7,7 +7,9 @@ defined('ABSPATH') || exit;
 final class Provider_Result {
     const MAX_IMAGE_BYTES = 15728640;
     const MAX_BODY_BYTES = 23068672;
-    const DOWNLOAD_TIMEOUT = 30;
+    // Image CDNs can take longer than WordPress's common 30-second default
+    // after a generation has completed. This GET never submits a new edit.
+    const DOWNLOAD_TIMEOUT = 110;
 
     /** @return array|\WP_Error Verified bytes/MIME, optionally a private recovery path. */
     public static function decode($response, array $job) {
@@ -101,7 +103,8 @@ final class Provider_Result {
                 if (preg_match('/\bcURL\s+error\s+([0-9]{1,3})\b/i', $response->get_error_message(), $match)) {
                     $detail .= '; cURL error ' . (int) $match[1];
                 }
-                return self::download_error($detail . '.');
+                $elapsed = max(0.0, self::clock() - $started);
+                return self::download_error($detail . '; elapsed_seconds=' . number_format($elapsed, 2, '.', '') . '; configured_timeout_seconds=' . self::DOWNLOAD_TIMEOUT . '.');
             }
             $status = (int) wp_remote_retrieve_response_code($response);
             if (in_array($status, array(301, 302, 303, 307, 308), true)) {

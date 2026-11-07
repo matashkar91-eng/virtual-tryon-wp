@@ -8,7 +8,7 @@ Use an administrator with ID 1 on this disposable install. Never point these scr
 VTO_WP_ROOT=/absolute/path/to/wordpress php tests/integration.php
 ```
 
-The PHP suite checks WooCommerce product visibility and allowlisting, private storage, invalid image rejection, durable job creation, hashed bearer tokens, idempotent processing, snapshotted demo/live mode, a mocked two-image edit request, bounded retries, safe upstream errors, expiry and deletion, atomic rate limits, and settings sanitization. It intercepts the AI HTTP call; no paid AI request is sent.
+The PHP suite checks WooCommerce product visibility and allowlisting, private storage, invalid image rejection, durable job creation, hashed bearer tokens, idempotent processing, snapshotted demo/live mode and image quality, safe legacy-quality migration, a mocked two-image edit request, bounded retries, safe upstream errors, expiry and deletion, atomic rate limits, and settings sanitization. It intercepts the AI HTTP call; no paid AI request is sent.
 
 Start the WordPress site, for example:
 

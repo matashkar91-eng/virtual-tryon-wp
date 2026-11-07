@@ -25,6 +25,12 @@ function check($condition, $message) {
     $passed++;
     echo "PASS $message\n";
 }
+function multipart_field_values($body, $name) {
+    if (!is_string($body) || !is_string($name)) { return []; }
+    $pattern = '/Content-Disposition: form-data; name="' . preg_quote($name, '/') . '"\r\n\r\n([^\r\n]*)\r\n/';
+    preg_match_all($pattern, $body, $matches);
+    return $matches[1] ?? [];
+}
 $old_settings = get_option('vto_settings', null);
 $old_user = get_current_user_id();
 $product_id = 0;
@@ -39,8 +45,15 @@ try {
     $settings['mode'] = 'demo';
     $settings['rate_limit'] = 2;
     $settings['global_rate_limit'] = 1000;
+    check($settings['quality'] === 'low', 'New installations default image generation to low quality');
+    $legacy_settings = $settings;
+    unset($legacy_settings['quality']);
+    update_option('vto_settings', $legacy_settings, false);
+    check(VTO\Settings::get()['quality'] === 'low', 'Existing installations without a quality setting inherit the low-cost default');
     update_option('vto_settings', $settings, false);
     VTO\Jobs::install();
+    $quality_column = $GLOBALS['wpdb']->get_row($GLOBALS['wpdb']->prepare('SHOW COLUMNS FROM ' . VTO\Jobs::table() . ' LIKE %s', 'quality'), ARRAY_A);
+    check(is_array($quality_column) && $quality_column['Default'] === 'legacy', 'Migrated job schema marks the original quality of pre-0.1.6 rows as unknown');
     $image = imagecreatetruecolor(128, 128);
     imagefill($image, 0, 0, imagecolorallocate($image, 90, 100, 155));
     ob_start(); imagepng($image); $png = ob_get_clean(); imagedestroy($image);
@@ -73,6 +86,14 @@ try {
     $token = $created['token'];
     $row = VTO\Jobs::by_id($id);
     check($row['token_hash'] === hash('sha256', $token) && !in_array($token, $row, true), 'Only tracking token hash is stored');
+    check($row['quality'] === 'low', 'Queued request snapshots the selected image quality');
+    $GLOBALS['wpdb']->update(VTO\Jobs::table(), ['quality'=>'invalid'], ['id'=>$id]);
+    VTO\Jobs::install();
+    check(VTO\Jobs::by_id($id)['quality'] === 'invalid', 'Migration does not relabel non-empty invalid quality values');
+    $GLOBALS['wpdb']->update(VTO\Jobs::table(), ['quality'=>''], ['id'=>$id]);
+    VTO\Jobs::install();
+    check(VTO\Jobs::by_id($id)['quality'] === 'legacy', 'Migration backfills empty driver values as unknown legacy quality');
+    $GLOBALS['wpdb']->update(VTO\Jobs::table(), ['quality'=>'low'], ['id'=>$id]);
     check(VTO\Jobs::by_token(str_repeat('0',64)) === null, 'Unknown tracking token returns no request');
     $settings['mode'] = 'avalai';
     $settings['api_key'] = 'integration-test-not-a-real-key';
@@ -82,6 +103,7 @@ try {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
         $calls++;
         check(substr_count($args['body'], 'name="image[]"') === 2, 'AI edit request contains person and product images');
+        check(multipart_field_values($args['body'], 'quality') === ['low'], 'AI edit request sends the snapshotted low quality exactly once');
         check(str_contains($args['body'], 'filename="person.png"') || str_contains($args['body'], 'filename="person.jpg"'), 'Customer image role is explicit');
         check($args['sslverify'] === true && $args['redirection'] === 0, 'Provider preserves TLS and does not forward credentials through redirects');
         return ['headers'=>[], 'response'=>['code'=>200,'message'=>'OK'], 'body'=>wp_json_encode(['data'=>[['b64_json'=>base64_encode($png)]]]), 'cookies'=>[]];
@@ -96,17 +118,49 @@ try {
     $live_input = VTO\Storage::save($png); $temporary_paths[] = $live_input;
     $live = VTO\Jobs::create(VTO\Catalog::find('wc:'.$product_id), $live_input);
     $created_jobs[] = $live['id'];
+    check(VTO\Jobs::by_id($live['id'])['quality'] === 'low', 'Live request stores quality before asynchronous processing');
+    $changed_quality_settings = $settings;
+    $changed_quality_settings['quality'] = 'high';
+    update_option('vto_settings', $changed_quality_settings, false);
     VTO\Jobs::process($live['id']);
     check(VTO\Jobs::by_id($live['id'])['status'] === 'completed' && $calls === 1, 'Live adapter accepts mocked valid multi-image API response');
     remove_filter('pre_http_request', $http_filter, 10);
     $live_row = VTO\Jobs::by_id($live['id']);
-    $response_body = ['data'=>[['b64_json'=>'not-valid-base64!!!']]];
+    $response_body = ['data'=>[['b64_json'=>base64_encode($png)]]];
     $response_code = 200;
-    $http_filter = function($pre, $args, $url) use (&$response_body, &$response_code) {
+    $provider_calls = 0;
+    $last_provider_body = '';
+    $http_filter = function($pre, $args, $url) use (&$response_body, &$response_code, &$provider_calls, &$last_provider_body) {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
+        $provider_calls++;
+        $last_provider_body = $args['body'];
         return ['headers'=>[], 'response'=>['code'=>$response_code,'message'=>'Mock'], 'body'=>wp_json_encode($response_body), 'cookies'=>[]];
     };
     add_filter('pre_http_request', $http_filter, 10, 3);
+    foreach (['low', 'medium', 'high', 'auto'] as $quality) {
+        $quality_job = $live_row;
+        $quality_job['quality'] = $quality;
+        $calls_before_quality = $provider_calls;
+        $quality_result = VTO\Provider::generate($quality_job);
+        check(!is_wp_error($quality_result) && $provider_calls === $calls_before_quality + 1
+            && multipart_field_values($last_provider_body, 'quality') === [$quality], 'Provider sends only the exact allowed quality value '.$quality);
+        check(!str_contains($last_provider_body, 'integration-test-not-a-real-key'), 'Multipart image body never contains the API credential');
+    }
+    $legacy_quality_job = $live_row;
+    $legacy_quality_job['quality'] = 'legacy';
+    $calls_before_legacy_quality = $provider_calls;
+    $legacy_quality_result = VTO\Provider::generate($legacy_quality_job);
+    check(!is_wp_error($legacy_quality_result) && $provider_calls === $calls_before_legacy_quality + 1
+        && multipart_field_values($last_provider_body, 'quality') === ['low'], 'Manual retry of a legacy job explicitly uses economical quality');
+    foreach (['standard', 'LOW', '', ['low'], "low\r\nContent-Disposition: form-data; name=\"injected\""] as $invalid_quality) {
+        $quality_job = $live_row;
+        $quality_job['quality'] = $invalid_quality;
+        $calls_before_quality = $provider_calls;
+        $invalid_quality_result = VTO\Provider::generate($quality_job);
+        check(is_wp_error($invalid_quality_result) && $invalid_quality_result->get_error_code() === 'vto_provider_quality'
+            && $provider_calls === $calls_before_quality, 'Invalid quality cannot inject or send a multipart request');
+    }
+    $response_body = ['data'=>[['b64_json'=>'not-valid-base64!!!']]];
     $bad_image = VTO\Provider::generate($live_row);
     check(is_wp_error($bad_image) && $bad_image->get_error_code() === 'vto_provider_image', 'Malformed base64 provider output is rejected');
     $response_body = ['data'=>[['url'=>'http://127.0.0.1/customer-photo']]];
@@ -177,23 +231,35 @@ try {
     $probe_count = $probe_calls;
     $probe = VTO\Provider::check_connection();
     check(is_wp_error($probe) && $probe_count === $probe_calls, 'Missing key blocks connectivity probe before any network request');
-    update_option('vto_settings', $settings, false);
+    $retry_snapshot_settings = $settings;
+    $retry_snapshot_settings['quality'] = 'medium';
+    update_option('vto_settings', $retry_snapshot_settings, false);
     remove_filter('pre_http_request', $http_filter, 10);
-    $http_filter = function($pre, $args, $url) {
+    $retry_qualities = [];
+    $http_filter = function($pre, $args, $url) use (&$retry_qualities) {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
+        $retry_qualities[] = multipart_field_values($args['body'], 'quality');
         return ['headers'=>[], 'response'=>['code'=>401,'message'=>'Unauthorized'], 'body'=>'{"error":{"code":"invalid_api_key","message":"do not persist arbitrary upstream messages"}}', 'cookies'=>[]];
     };
     add_filter('pre_http_request', $http_filter, 10, 3);
     $bad_input = VTO\Storage::save($png); $temporary_paths[] = $bad_input;
     $bad = VTO\Jobs::create(VTO\Catalog::find('wc:'.$product_id), $bad_input);
     $created_jobs[] = $bad['id'];
+    check(VTO\Jobs::by_id($bad['id'])['quality'] === 'medium', 'Failed request snapshots its original quality for explicit retries');
     VTO\Jobs::process($bad['id']);
     $failed = VTO\Jobs::by_id($bad['id']);
     check($failed['status'] === 'failed' && $failed['error_code'] === 'vto_provider_auth', 'Provider authorization failure is diagnosed safely');
     check(!str_contains(wp_json_encode($failed), 'do not persist') && !str_contains(wp_json_encode($failed), 'integration-test-not-a-real-key'), 'Upstream raw error content and credentials do not reach job logs');
+    $changed_retry_settings = $retry_snapshot_settings;
+    $changed_retry_settings['quality'] = 'high';
+    update_option('vto_settings', $changed_retry_settings, false);
     check(VTO\Jobs::retry($bad['id']) === true, 'Admin can explicitly retry a retained failed request');
     VTO\Jobs::process($bad['id']);
-    VTO\Jobs::retry($bad['id']); VTO\Jobs::process($bad['id']);
+    $changed_retry_settings['quality'] = 'auto';
+    update_option('vto_settings', $changed_retry_settings, false);
+    check(VTO\Jobs::retry($bad['id']) === true, 'Admin can explicitly run the final retained retry');
+    VTO\Jobs::process($bad['id']);
+    check($retry_qualities === [['medium'], ['medium'], ['medium']] && VTO\Jobs::by_id($bad['id'])['quality'] === 'medium', 'Retries keep the request quality snapshot when store settings change');
     check(is_wp_error(VTO\Jobs::retry($bad['id'])), 'Three-attempt retry cap is enforced');
     $expiry = gmdate('Y-m-d H:i:s', time()-60);
     $GLOBALS['wpdb']->update(VTO\Jobs::table(), ['expires_at'=>$expiry], ['id'=>$id]);
@@ -211,7 +277,34 @@ try {
     add_filter('vto_rate_identity', $rate_filter);
     check(VTO\Jobs::budget() === true && VTO\Jobs::budget() === true && is_wp_error(VTO\Jobs::budget()), 'Guest hourly request limit is enforced by atomic database budget');
     remove_filter('vto_rate_identity', $rate_filter);
+    $corrupt_quality_settings = $settings;
+    $corrupt_quality_settings['quality'] = "low\r\nContent-Disposition: form-data; name=\"injected\"";
+    update_option('vto_settings', $corrupt_quality_settings, false);
+    $corrupt_quality_input = VTO\Storage::save($png); $temporary_paths[] = $corrupt_quality_input;
+    $corrupt_quality_job = VTO\Jobs::create(VTO\Catalog::find('wc:'.$product_id), $corrupt_quality_input);
+    check(!is_wp_error($corrupt_quality_job), 'Queue accepts a request after recovering from a corrupted saved quality');
+    if (!is_wp_error($corrupt_quality_job)) {
+        $created_jobs[] = $corrupt_quality_job['id'];
+        check(VTO\Jobs::by_id($corrupt_quality_job['id'])['quality'] === 'low', 'Corrupted saved quality is snapshotted as safe low quality');
+    }
     $settings['api_key'] = 'integration-test-not-a-real-key';
+    update_option('vto_settings', $settings, false);
+    foreach (['low', 'medium', 'high', 'auto'] as $quality) {
+        $sanitized = VTO\Settings::sanitize(['quality'=>$quality]);
+        check($sanitized['quality'] === $quality, 'Settings accept exact image quality '.$quality);
+    }
+    $quality_baseline = $settings;
+    $quality_baseline['quality'] = 'medium';
+    update_option('vto_settings', $quality_baseline, false);
+    foreach (['standard', 'LOW', '', ['low'], "low\r\nContent-Disposition: form-data; name=\"injected\""] as $invalid_quality) {
+        $sanitized = VTO\Settings::sanitize(['quality'=>$invalid_quality]);
+        check($sanitized['quality'] === 'medium', 'Invalid quality input preserves the current valid setting');
+    }
+    $sanitized = VTO\Settings::sanitize(['title'=>$settings['title']]);
+    check($sanitized['quality'] === 'medium', 'Missing quality input preserves the current valid setting');
+    update_option('vto_settings', $corrupt_quality_settings, false);
+    $sanitized = VTO\Settings::sanitize(['quality'=>'invalid']);
+    check($sanitized['quality'] === 'low', 'Invalid input and corrupted stored quality recover to the safe low default');
     update_option('vto_settings', $settings, false);
     $sanitized = VTO\Settings::sanitize(['api_key'=>'', 'accent_color'=>'javascript:alert(1)', 'product_ids'=>[$product_id, $product_id]]);
     check($sanitized['api_key'] === $settings['api_key'], 'Blank API key field preserves credential');

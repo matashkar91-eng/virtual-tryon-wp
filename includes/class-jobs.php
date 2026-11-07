@@ -22,6 +22,7 @@ final class Jobs {
             category varchar(40) NOT NULL,
             mode varchar(20) NOT NULL,
             model varchar(190) NOT NULL,
+            quality varchar(10) NOT NULL DEFAULT 'legacy',
             prompt text NOT NULL,
             input_path text NOT NULL,
             output_path text NOT NULL,
@@ -39,6 +40,11 @@ final class Jobs {
             KEY status (status),
             KEY expires_at (expires_at)
         ) $collate;");
+        // Some dbDelta/database-driver combinations fill a newly added NOT NULL
+        // column with an empty string instead of its declared default. Those rows
+        // predate quality snapshots, so preserve that audit fact as `legacy`.
+        // Non-empty unknown values stay untouched and will be rejected by Provider.
+        $wpdb->query("UPDATE $table SET quality = 'legacy' WHERE quality = '' OR quality IS NULL");
         $rates = self::rates();
         dbDelta("CREATE TABLE $rates (
             bucket varchar(64) NOT NULL,
@@ -94,6 +100,7 @@ final class Jobs {
     public static function create(array $product, string $input) {
         global $wpdb;
         $settings = Settings::get();
+        $quality = Settings::valid_quality(isset($settings['quality']) ? $settings['quality'] : null) ? $settings['quality'] : Settings::defaults()['quality'];
         $token = bin2hex(random_bytes(32));
         $now = gmdate('Y-m-d H:i:s');
         $row = [
@@ -101,6 +108,7 @@ final class Jobs {
             'product_id' => $product['id'], 'product_name' => $product['name'],
             'product_image' => $product['image'], 'product_image_id' => $product['image_id'],
             'category' => $product['category'], 'mode' => $settings['mode'], 'model' => $settings['model'],
+            'quality' => $quality,
             'prompt' => strtr($settings['prompt'], ['{product}' => $product['name'], '{category}' => $product['category']]),
             'input_path' => $input, 'output_path' => '', 'reference_path' => '', 'error_message' => '', 'error_detail' => '',
             'created_at' => $now, 'updated_at' => $now,

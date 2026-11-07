@@ -49,6 +49,16 @@ final class Provider {
         if (!Settings::valid_model($model)) {
             return self::error('vto_provider_model', 'مدل پردازش فروشگاه هنوز تنظیم نشده است.', 'An image-edit-capable AvalAI model is required.');
         }
+        $has_quality_snapshot = array_key_exists('quality', $job);
+        $quality = $has_quality_snapshot ? $job['quality'] : (isset($settings['quality']) ? $settings['quality'] : 'low');
+        // Rows created before 0.1.6 did not record the provider-selected tier.
+        // Keep that audit fact in storage, but make an explicit manual retry economical.
+        if ($has_quality_snapshot && 'legacy' === $quality) {
+            $quality = 'low';
+        }
+        if (!Settings::valid_quality($quality)) {
+            return self::error('vto_provider_quality', 'کیفیت ساخت تصویر معتبر نیست؛ تنظیمات فروشگاه را بررسی کنید.', 'Image edit quality must be one of low, medium, high or auto.');
+        }
         $product = self::product_image($job);
         if (is_wp_error($product)) {
             return $product;
@@ -63,6 +73,7 @@ final class Provider {
         $boundary = 'vto-' . bin2hex(random_bytes(18));
         $body = self::field($boundary, 'model', $model)
             . self::field($boundary, 'prompt', substr($prompt, 0, 12000))
+            . self::field($boundary, 'quality', $quality)
             . self::field($boundary, 'n', '1')
             . self::field($boundary, 'size', '1024x1024')
             . self::image_part($boundary, 'person', $input)

@@ -12,6 +12,7 @@ final class Settings {
             'mode' => 'demo',
             'api_key' => '',
             'model' => 'gpt-image-2.5-flare',
+            'quality' => 'low',
             'category' => 'auto',
             'garment_type' => 'scarf',
             'prompt' => 'Create a realistic virtual try-on of {product} ({category}) on the person in the input photo. Preserve the person, face, body proportions, pose, lighting and background. Change only the selected garment or accessory. Preserve its material, pattern and colors. Use a clean, natural result.',
@@ -61,6 +62,10 @@ final class Settings {
             && preg_match('~\A[A-Za-z0-9][A-Za-z0-9_.:-]*(?:/[A-Za-z0-9][A-Za-z0-9_.:-]*){0,4}\z~', $model) === 1;
     }
 
+    public static function valid_quality($quality): bool {
+        return is_string($quality) && in_array($quality, array('low', 'medium', 'high', 'auto'), true);
+    }
+
     public static function sanitize($input) {
         $old = self::get();
         if (!current_user_can('manage_options') || !is_array($input)) {
@@ -76,6 +81,11 @@ final class Settings {
             if (isset($input[$key]) && in_array($input[$key], $values, true)) {
                 $out[$key] = $input[$key];
             }
+        }
+        // Missing or malformed input must not silently change the merchant's saved cost profile.
+        $out['quality'] = self::valid_quality(isset($old['quality']) ? $old['quality'] : null) ? $old['quality'] : self::defaults()['quality'];
+        if (isset($input['quality']) && self::valid_quality($input['quality'])) {
+            $out['quality'] = $input['quality'];
         }
         foreach (array('title', 'product_label', 'upload_label', 'button_label', 'success_message') as $key) {
             $out[$key] = isset($input[$key]) ? sanitize_text_field($input[$key]) : $old[$key];

@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.5
+Stable tag: 0.1.6
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -24,16 +24,32 @@ check sends the saved API key to GET https://api.avalai.ir/v1/models, including
 when demo is selected. It retrieves model availability without generating images.
 The operator must review AvalAI's current terms, privacy and image-edit API support
 before enabling live use.
-AvalAI multi-image endpoint/model compatibility has NOT been live verified.
+A live multi-image edit has succeeded on one merchant account; availability,
+quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.1.6 =
+Image-edit quality now defaults to low (Economy) and is sent explicitly instead
+of leaving the tier to the provider. Existing settings and jobs remain available.
+Review the quality field, save settings, and measure one new request in AvalAI
+usage before opening the feature broadly. Price is not fixed or guaranteed by
+this plugin.
+
 = 0.1.5 =
 After confirming version 0.1.5 is active, deactivate only the temporary AvalAI
 timeout workaround if you added it in Code Snippets. Existing failed jobs are not
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.1.6 =
+Add a validated image-quality setting with Economy (low) as the safe default,
+plus medium, high and provider-controlled auto choices. Send the selected value
+in the image-edit request and snapshot it with each new job so its manual retry
+keeps that cost profile. Pre-0.1.6 jobs keep an unknown-quality marker and retry
+with low. Show the saved quality in request history. No request is generated
+during upgrade, and exact provider price remains variable.
+
 = 0.1.5 =
 Enforce the configured edit timeout at both WordPress HTTP and cURL layers,
 only while the single AvalAI image-edit request is active. Disable cURL's

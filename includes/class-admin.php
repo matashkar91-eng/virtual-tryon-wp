@@ -51,6 +51,17 @@ final class Admin {
         echo '</select>';
     }
 
+    private static function quality_label($quality) {
+        $labels = array(
+            'low' => 'اقتصادی؛ پیشنهادی برای کاهش هزینه',
+            'medium' => 'متعادل؛ کیفیت و هزینهٔ متوسط',
+            'high' => 'کیفیت بالا؛ با هزینهٔ بیشتر',
+            'auto' => 'خودکار سرویس؛ با هزینهٔ متغیر',
+            'legacy' => 'درخواست قدیمی؛ کیفیت اولیه ثبت نشده، تکرار با اقتصادی',
+        );
+        return isset($labels[$quality]) ? $labels[$quality] : 'نامعتبر؛ اجرا نمی‌شود';
+    }
+
     private static function media_field($settings, $key) {
         $id = absint($settings[$key]);
         printf('<div class="vto-media"><input type="hidden" name="vto_settings[%s]" value="%d"><span class="vto-media-preview">', esc_attr($key), $id);
@@ -111,10 +122,11 @@ final class Admin {
                     </tbody></table><p><button type="button" class="button" id="vto-add-manual">+ افزودن محصول مستقل</button></p></details>
                 </section>
 
-                <section class="vto-card" id="vto-provider"><h2>اتصال به اول‌ای‌آی (AvalAI)</h2><p class="vto-warning">اتصال واقعی این نسخه هنوز با حساب AvalAI تأیید نشده است. آداپتور با قالب ویرایش تصویر سازگار با OpenAI و دو تصویر ورودی نوشته شده؛ پیش از عرضه، پشتیبانی مسیر و مدل را با مستندات و حساب خود بررسی و یک درخواست واقعی آزمایش کنید.</p><p><a href="#vto-connection-test">بررسی اتصال و دسترسی مدل بدون ارسال عکس ↓</a></p><table class="form-table" role="presentation"><tbody>
+                <section class="vto-card" id="vto-provider"><h2>اتصال به اول‌ای‌آی (AvalAI)</h2><p class="vto-warning">مسیر ویرایش دو تصویر با شناسهٔ پیش‌فرض <code>gpt-image-2.5-flare</code> در حساب آزمایشی این پروژه با موفقیت اجرا شده است. این نتیجه دسترسی، کیفیت یا هزینهٔ حساب و مدل فعلی شما را تضمین نمی‌کند؛ پیش از عرضهٔ عمومی، یک درخواست کنترل‌شده در حساب خود اجرا و مصرف آن را بررسی کنید.</p><p><a href="#vto-connection-test">بررسی اتصال و دسترسی مدل بدون ارسال عکس ↓</a></p><table class="form-table" role="presentation"><tbody>
                     <tr><th scope="row"><label for="vto-mode">حالت اجرا</label></th><td><?php self::select($s, 'mode', array('demo' => 'آزمایشی؛ بدون فراخوانی API و بدون تعویض لباس', 'avalai' => 'واقعی؛ اتصال به AvalAI و مصرف اعتبار')); ?><p class="description">حالت آزمایشی فقط بارگذاری، صف، پیگیری و دریافت فایل را بررسی می‌کند؛ تصویر پرو واقعی تولید نمی‌کند.</p></td></tr>
                     <tr><th scope="row"><label for="vto-api_key">کلید API</label></th><td><input class="regular-text" type="password" id="vto-api_key" name="vto_settings[api_key]" value="" autocomplete="new-password" dir="ltr" spellcheck="false"><p class="description"><?php echo defined('VTO_AVALAI_KEY') && VTO_AVALAI_KEY ? 'کلید از ثابت VTO_AVALAI_KEY در تنظیمات سرور خوانده می‌شود.' : ($s['api_key'] ? 'کلید ذخیره شده است. خالی گذاشتن این کادر کلید قبلی را نگه می‌دارد.' : 'هنوز کلیدی ذخیره نشده است. کلید را فقط از حساب AvalAI دریافت کنید.'); ?> کلید به مرورگر مشتری ارسال نمی‌شود.</p><label><input type="checkbox" name="vto_settings[clear_api_key]" value="1"> حذف کلید ذخیره‌شده در پایگاه داده</label><p class="description">برای مدیریت کلید در سرور می‌توانید ثابت <code>VTO_AVALAI_KEY</code> را در <code>wp-config.php</code> تعریف کنید. کلید ذخیره‌شده در وردپرس رمزگذاری جداگانه ندارد؛ دسترسی مدیر و پایگاه داده را محدود نگه دارید.</p></td></tr>
                     <tr><th scope="row"><label for="vto-model">شناسهٔ مدل ویرایش تصویر</label></th><td><?php self::input($s, 'model', 'text', 'dir="ltr" spellcheck="false"'); ?><p class="description">مدل باید در حساب شما از ویرایش تصویر با دو تصویر ورودی پشتیبانی کند. تغییر این نام به‌تنهایی پشتیبانی از قالب API دیگری اضافه نمی‌کند.</p></td></tr>
+                    <tr><th scope="row"><label for="vto-quality">کیفیت و هزینهٔ تصویر</label></th><td><?php self::select($s, 'quality', array('low' => self::quality_label('low'), 'medium' => self::quality_label('medium'), 'high' => self::quality_label('high'), 'auto' => self::quality_label('auto'))); ?><p class="description">حالت اقتصادی برای کاهش هزینه به‌صورت پیش‌فرض انتخاب شده است. کیفیت بالاتر معمولاً اعتبار بیشتری مصرف می‌کند؛ مبلغ نهایی را مدل و تعرفهٔ AvalAI تعیین می‌کند. این انتخاب فقط روی درخواست‌های تازه اثر می‌گذارد.</p></td></tr>
                     <tr><th scope="row"><label for="vto-prompt">الگوی پرامپت</label></th><td><?php self::textarea($s, 'prompt', 7); ?><p class="description">متغیرهای قابل جایگزینی: <code>{product}</code> نام محصول و <code>{category}</code> گروه محصول. پرامپت باید حفظ چهره، تناسب بدن، رنگ و طرح محصول را روشن بیان کند. پیش از عرضه برای هر گروه چند عکس واقعی را آزمایش کنید؛ خروجی تضمین اندازه یا تن‌خور دقیق نیست.</p></td></tr>
                 </tbody></table></section>
 
@@ -353,7 +365,7 @@ final class Admin {
                     <?php if ($uncertain_billing) : ?><p class="description"><strong>هشدار هزینه:</strong> قطع ارتباط یا پاسخ ناقص ثابت نمی‌کند ساخت انجام نشده است. پیش از «ساخت دوباره»، تاریخچه و مصرف همین درخواست را در AvalAI بررسی کنید؛ اصلاح زمان انتظار نتیجهٔ قبلی را بازیابی نمی‌کند.</p><?php endif; ?>
                     <?php if (!empty($job['error_detail'])) : ?><details><summary>جزئیات فنی خطا برای مدیر</summary><pre class="vto-diagnostic" dir="auto"><?php echo esc_html($job['error_detail']); ?></pre></details><?php endif; ?>
                     <?php if (!empty($job['provider_request_id'])) : ?><br><small>شناسهٔ سرویس: <code dir="ltr"><?php echo esc_html($job['provider_request_id']); ?></code></small><?php endif; ?>
-                    <details><summary>تنظیمات هنگام ثبت درخواست</summary><dl class="vto-job-snapshot"><dt>حالت اجرا</dt><dd><?php echo isset($job['mode']) && $job['mode'] === 'avalai' ? 'واقعی؛ AvalAI' : 'آزمایشی؛ بدون ساخت تصویر واقعی'; ?></dd><dt>مدل</dt><dd><code dir="ltr"><?php echo esc_html(isset($job['model']) ? $job['model'] : ''); ?></code></dd><dt>پرامپت ارسال‌شده</dt><dd><pre class="vto-diagnostic" dir="auto"><?php echo esc_html(isset($job['prompt']) ? $job['prompt'] : ''); ?></pre></dd></dl><p class="description">تلاش دوباره از همین حالت، مدل و پرامپت ذخیره‌شده استفاده می‌کند. برای آزمایش تنظیمات جدید، یک درخواست تازه بسازید.</p></details>
+                    <details><summary>تنظیمات هنگام ثبت درخواست</summary><dl class="vto-job-snapshot"><dt>حالت اجرا</dt><dd><?php echo isset($job['mode']) && $job['mode'] === 'avalai' ? 'واقعی؛ AvalAI' : 'آزمایشی؛ بدون ساخت تصویر واقعی'; ?></dd><dt>مدل</dt><dd><code dir="ltr"><?php echo esc_html(isset($job['model']) ? $job['model'] : ''); ?></code></dd><dt>کیفیت و هزینه</dt><dd><?php echo esc_html(self::quality_label(isset($job['quality']) ? $job['quality'] : 'legacy')); ?></dd><dt>پرامپت ارسال‌شده</dt><dd><pre class="vto-diagnostic" dir="auto"><?php echo esc_html(isset($job['prompt']) ? $job['prompt'] : ''); ?></pre></dd></dl><p class="description">تلاش دوباره از همان حالت، مدل و پرامپت ثبت‌شده استفاده می‌کند. کیفیت درخواست‌های جدید حفظ می‌شود؛ درخواست قدیمیِ بدون ثبت کیفیت با حالت اقتصادی تکرار می‌شود. برای آزمایش تنظیمات تازه، یک درخواست جدید بسازید.</p></details>
                     </td><td><?php if ($status === 'failed' && !empty($job['reference_path'])) { self::job_button($id, 'recover', 'دریافت دوبارهٔ نتیجه (بدون ساخت جدید)'); } if ($status === 'failed' && empty($job['reference_path'])) { self::job_button($id, 'retry', 'ساخت دوبارهٔ تصویر (احتمال مصرف اعتبار)', isset($job['mode']) && 'avalai' === $job['mode']); } self::job_button($id, 'delete', 'حذف عکس‌ها و درخواست'); ?></td></tr>
             <?php endforeach; ?>
             </tbody></table></div><p class="description">برای تازه‌کردن وضعیت، صفحه را بازخوانی کنید. زمان‌ها بر حسب UTC هستند. خطاهای سرویس به شکل پاک‌سازی‌شده نمایش داده می‌شوند؛ کلید API و محتوای حساس پاسخ ذخیره نمی‌شود.</p>

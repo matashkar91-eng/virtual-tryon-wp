@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.7
+Stable tag: 0.1.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,11 @@ quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.1.8 =
+Administrators can run an existing queued request directly from request history
+when the host's WP-Cron runner is unavailable. This runs the same request and
+does not create a duplicate job.
+
 = 0.1.7 =
 The fixed provider instructions now require a visible product replacement and
 explicitly reject an unchanged original item. Scarf jobs tell the model to remove
@@ -48,6 +53,11 @@ timeout workaround if you added it in Code Snippets. Existing failed jobs are no
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.1.8 =
+Add an authenticated, nonce-protected "run now" action for queued requests. It
+lets the store administrator process the same queued row without hosting access,
+while preserving the existing atomic claim that prevents duplicate execution.
+
 = 0.1.7 =
 Strengthen the non-editable image-role instructions for scarf, clothing, glasses
 and jewelry jobs. Tell the model to isolate the product from its reference photo,

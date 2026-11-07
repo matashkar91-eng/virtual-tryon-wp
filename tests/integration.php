@@ -126,8 +126,9 @@ try {
     $changed_quality_settings = $settings;
     $changed_quality_settings['quality'] = 'high';
     update_option('vto_settings', $changed_quality_settings, false);
-    VTO\Jobs::process($live['id']);
-    check(VTO\Jobs::by_id($live['id'])['status'] === 'completed' && $calls === 1, 'Live adapter accepts mocked valid multi-image API response');
+    $run_now = VTO\Jobs::run_queued_now($live['id']);
+    check($run_now === true && VTO\Jobs::by_id($live['id'])['status'] === 'completed' && $calls === 1, 'Administrator can directly run the same queued request when WP-Cron is unavailable');
+    check(is_wp_error(VTO\Jobs::run_queued_now($live['id'])) && (int) VTO\Jobs::by_id($live['id'])['attempts'] === 1, 'Run-now action cannot duplicate a completed paid request');
     check($replacement_prompt_seen, 'Provider rejects an unchanged original item in its fixed edit instructions');
     check($scarf_prompt_seen, 'Scarf edit explicitly replaces the worn scarf while retaining merchant instructions');
     remove_filter('pre_http_request', $http_filter, 10);

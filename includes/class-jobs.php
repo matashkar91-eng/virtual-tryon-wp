@@ -171,6 +171,23 @@ final class Jobs {
         }
     }
 
+    /** Let an administrator run a queued request when WP-Cron is unavailable. */
+    public static function run_queued_now(int $id) {
+        $job = self::by_id($id);
+        if (!$job || $job['status'] !== 'queued' || $job['expires_at'] <= gmdate('Y-m-d H:i:s')) {
+            return new \WP_Error('run_unavailable', 'فقط درخواست در صف و منقضی‌نشده قابل اجرای مستقیم است.');
+        }
+        if (!Storage::owns($job['input_path'])) {
+            return new \WP_Error('input_missing', 'عکس ورودی موجود نیست؛ درخواست جدید ثبت کنید.');
+        }
+        self::process($id);
+        $updated = self::by_id($id);
+        if (!$updated || $updated['status'] === 'queued') {
+            return new \WP_Error('run_conflict', 'اجرای درخواست شروع نشد؛ صفحه را تازه کنید و وضعیت را دوباره ببینید.');
+        }
+        return true;
+    }
+
     /** Commit a private result reference before its network download starts. */
     public static function record_reference(int $id, string $path): bool {
         global $wpdb;

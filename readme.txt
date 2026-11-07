@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.1.6
+Stable tag: 0.1.7
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,12 @@ quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.1.7 =
+The fixed provider instructions now require a visible product replacement and
+explicitly reject an unchanged original item. Scarf jobs tell the model to remove
+the worn scarf completely and reproduce the selected scarf's print, colors,
+border and fabric appearance. Existing store settings remain available.
+
 = 0.1.6 =
 Image-edit quality now defaults to low (Economy) and is sent explicitly instead
 of leaving the tier to the provider. Existing settings and jobs remain available.
@@ -42,6 +48,14 @@ timeout workaround if you added it in Code Snippets. Existing failed jobs are no
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.1.7 =
+Strengthen the non-editable image-role instructions for scarf, clothing, glasses
+and jewelry jobs. Tell the model to isolate the product from its reference photo,
+remove the existing matching item, visibly reproduce distinctive product details,
+and never treat the unchanged input as a valid result. Preserve merchant prompts
+as additional instructions after these fixed requirements. Show the selected
+product reference beside the input and output in administrator request history.
+
 = 0.1.6 =
 Add a validated image-quality setting with Economy (low) as the safe default,
 plus medium, high and provider-controlled auto choices. Send the selected value

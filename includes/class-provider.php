@@ -68,8 +68,10 @@ final class Provider {
             '{product}' => isset($job['product_name']) ? (string) $job['product_name'] : '',
             '{category}' => isset($job['category']) ? (string) $job['category'] : '',
         ));
-        // Establish image roles even when the merchant replaces the prompt.
-        $prompt = "Image 1 is the consenting customer's photograph. Image 2 is the product reference. Edit image 1 to show that exact product worn naturally. Preserve the person's identity, face, pose and background. Only change the relevant garment or accessory. Do not add text or logos.\n\n" . $prompt;
+        // Establish non-negotiable image roles and replacement requirements even
+        // when a merchant supplies a short or ambiguous custom prompt.
+        $category = isset($job['category']) ? (string) $job['category'] : '';
+        $prompt = self::replacement_instructions($category) . "\n\nMerchant instructions:\n" . $prompt;
         $boundary = 'vto-' . bin2hex(random_bytes(18));
         $body = self::field($boundary, 'model', $model)
             . self::field($boundary, 'prompt', substr($prompt, 0, 12000))
@@ -111,6 +113,22 @@ final class Provider {
         }
         unset($raw);
         return self::with_transport_diagnostics(Provider_Result::decode($response, $job), $transport);
+    }
+
+    private static function replacement_instructions(string $category): string {
+        $base = "Image 1 is the consenting customer's photograph. Image 2 is the product reference. "
+            . "Identify and isolate the product itself in Image 2; ignore any model, mannequin, background, text or styling around it. "
+            . "Make a clearly visible replacement in Image 1: completely remove the existing item of the same type and replace it with the exact product from Image 2. "
+            . "Do not preserve, recolor or blend the original item. The result is invalid if the original item remains unchanged or if the distinctive color, print, pattern, border and material details from Image 2 are missing. "
+            . "Preserve the person's identity, face, skin, body proportions, pose, lighting and background. Change only the relevant garment or accessory. Do not add text or logos. "
+            . "These replacement requirements take priority over any conflicting merchant instruction below. ";
+        $specific = array(
+            'scarf' => "For a scarf or hijab, fully replace the scarf currently covering the head, neck and shoulders. Do not combine the old scarf with the new one. Reproduce the reference scarf's visible print, colors, border and fabric appearance, then drape it naturally around the same person.",
+            'clothing' => "For clothing, replace only the selected garment while keeping the person's body, other clothing and accessories unchanged. Match the reference garment's cut, color, print, fabric and visible details.",
+            'glasses' => "For glasses, remove any existing eyewear and place the exact reference frame naturally on the same face. Keep the eyes and facial features unchanged, and make the frame shape and color clearly recognizable.",
+            'jewelry' => "For jewelry, replace the matching existing accessory and make the exact reference piece clearly visible in its natural wearing position. Preserve the face, skin and all unrelated accessories.",
+        );
+        return $base . (isset($specific[$category]) ? $specific[$category] : $specific['clothing']);
     }
 
     /**

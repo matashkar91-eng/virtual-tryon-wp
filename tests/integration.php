@@ -99,11 +99,15 @@ try {
     $settings['api_key'] = 'integration-test-not-a-real-key';
     update_option('vto_settings', $settings, false);
     $calls = 0;
-    $http_filter = function($pre, $args, $url) use (&$calls, $png) {
+    $replacement_prompt_seen = false;
+    $scarf_prompt_seen = false;
+    $http_filter = function($pre, $args, $url) use (&$calls, &$replacement_prompt_seen, &$scarf_prompt_seen, $png) {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
         $calls++;
         check(substr_count($args['body'], 'name="image[]"') === 2, 'AI edit request contains person and product images');
         check(multipart_field_values($args['body'], 'quality') === ['low'], 'AI edit request sends the snapshotted low quality exactly once');
+        $replacement_prompt_seen = substr_count($args['body'], 'name="prompt"') === 1 && str_contains($args['body'], 'The result is invalid if the original item remains unchanged');
+        $scarf_prompt_seen = str_contains($args['body'], 'fully replace the scarf currently covering the head, neck and shoulders') && str_contains($args['body'], 'Merchant instructions:');
         check(str_contains($args['body'], 'filename="person.png"') || str_contains($args['body'], 'filename="person.jpg"'), 'Customer image role is explicit');
         check($args['sslverify'] === true && $args['redirection'] === 0, 'Provider preserves TLS and does not forward credentials through redirects');
         return ['headers'=>[], 'response'=>['code'=>200,'message'=>'OK'], 'body'=>wp_json_encode(['data'=>[['b64_json'=>base64_encode($png)]]]), 'cookies'=>[]];
@@ -124,6 +128,8 @@ try {
     update_option('vto_settings', $changed_quality_settings, false);
     VTO\Jobs::process($live['id']);
     check(VTO\Jobs::by_id($live['id'])['status'] === 'completed' && $calls === 1, 'Live adapter accepts mocked valid multi-image API response');
+    check($replacement_prompt_seen, 'Provider rejects an unchanged original item in its fixed edit instructions');
+    check($scarf_prompt_seen, 'Scarf edit explicitly replaces the worn scarf while retaining merchant instructions');
     remove_filter('pre_http_request', $http_filter, 10);
     $live_row = VTO\Jobs::by_id($live['id']);
     $response_body = ['data'=>[['b64_json'=>base64_encode($png)]]];

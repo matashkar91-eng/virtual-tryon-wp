@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.2.1
+Stable tag: 0.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,6 +29,13 @@ quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.3.0 =
+The plugin now derives a scarf-design detail from the existing WooCommerce
+product photo and sends it before the full store photo. No separate reference
+upload is required. It also refuses a provider result that is the unchanged
+customer photo and omits the optional complexity parameter used by neither the
+proven legacy workflow nor this release.
+
 = 0.2.1 =
 When the host cannot download an already-generated signed result, the authorized
 customer or administrator can open that same result directly in their browser.
@@ -67,6 +74,16 @@ timeout workaround if you added it in Code Snippets. Existing failed jobs are no
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.3.0 =
+Use the store's existing product image to build a model-resistant scarf design
+reference automatically. Send customer identity first, derived product detail
+second and the original full product photo only as drape/context. Strengthen
+the fixed role prompt so a person in the product photo cannot replace the
+customer. Keep low quality, 1024x1024, one output and no complexity override to
+match the previously successful low-cost request contract. Detect exact and
+conservatively near-identical customer-photo outputs, do not expose them as a
+completed try-on, and block the same paid retry.
+
 = 0.2.1 =
 Add a browser-direct fallback for saved provider results when server egress to
 the image CDN times out. Keep the signed URL out of status JSON and HTML; expose

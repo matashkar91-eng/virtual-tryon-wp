@@ -135,6 +135,67 @@ final class Provider_Result {
         return self::download_error('Result download redirect limit reached.');
     }
 
+    /**
+     * Refuse an output that is the input photograph again. This check is kept
+     * conservative: an exact byte match is always rejected; a decoded visual
+     * match is rejected only when both small normalized samples are almost the
+     * same. Decode uncertainty never turns a valid output into a false failure.
+     */
+    public static function ensure_changed(array $output, string $input_path) {
+        if (!isset($output['bytes']) || !is_string($output['bytes']) || !is_file($input_path) || !is_readable($input_path)) {
+            return $output;
+        }
+        $input = @file_get_contents($input_path);
+        if (!is_string($input) || $input === '') { return $output; }
+        $same = hash_equals(hash('sha256', $input), hash('sha256', $output['bytes']));
+        if (!$same) {
+            $near = self::near_identical($input, $output['bytes']);
+            $same = $near === true;
+        }
+        if (!$same) { return $output; }
+        $data = array('detail' => 'Provider output matched the customer input (exact or conservative near-identical comparison). No automatic resubmission.');
+        return new \WP_Error(
+            'vto_provider_unchanged',
+            'سرویس همان عکس ورودی را بدون تعویض محصول برگرداند. این نتیجه تحویل داده نمی‌شود و برای جلوگیری از هزینه، خودکار تکرار نخواهد شد.',
+            $data
+        );
+    }
+
+    /** @return bool|null True only for a strong match; null means no verdict. */
+    private static function near_identical(string $input, string $output) {
+        if (!function_exists('imagecreatefromstring') || !function_exists('imagecopyresampled')) { return null; }
+        $a_info = @getimagesizefromstring($input); $b_info = @getimagesizefromstring($output);
+        if (!$a_info || !$b_info || $a_info[0] * $a_info[1] > 12000000 || $b_info[0] * $b_info[1] > 12000000) { return null; }
+        $a = null; $b = null; $small_a = null; $small_b = null;
+        try {
+            $a = @imagecreatefromstring($input); $b = @imagecreatefromstring($output);
+            if (!$a || !$b) { return null; }
+            $side = 64;
+            $small_a = imagecreatetruecolor($side, $side); $small_b = imagecreatetruecolor($side, $side);
+            if (!$small_a || !$small_b) { return null; }
+            $white_a = imagecolorallocate($small_a, 255, 255, 255); $white_b = imagecolorallocate($small_b, 255, 255, 255);
+            imagefill($small_a, 0, 0, $white_a); imagefill($small_b, 0, 0, $white_b);
+            imagecopyresampled($small_a, $a, 0, 0, 0, 0, $side, $side, imagesx($a), imagesy($a));
+            imagecopyresampled($small_b, $b, 0, 0, 0, 0, $side, $side, imagesx($b), imagesy($b));
+            $sum = 0; $different = 0; $pixels = $side * $side;
+            for ($y = 0; $y < $side; $y++) {
+                for ($x = 0; $x < $side; $x++) {
+                    $ca = imagecolorat($small_a, $x, $y); $cb = imagecolorat($small_b, $x, $y);
+                    $dr = abs((($ca >> 16) & 255) - (($cb >> 16) & 255));
+                    $dg = abs((($ca >> 8) & 255) - (($cb >> 8) & 255));
+                    $db = abs(($ca & 255) - ($cb & 255));
+                    $sum += $dr + $dg + $db;
+                    if (max($dr, $dg, $db) >= 18) { $different++; }
+                }
+            }
+            return ($sum / ($pixels * 3)) <= 2.0 && ($different / $pixels) <= 0.03;
+        } catch (\Throwable $ignored) {
+            return null;
+        } finally {
+            foreach (array($a, $b, $small_a, $small_b) as $resource) { if ($resource) { imagedestroy($resource); } }
+        }
+    }
+
     /** Restore safe transport options after late third-party hooks for one result GET. */
     private static function result_request(string $url, array $args, int $timeout, array &$diagnostics) {
         $marker = bin2hex(random_bytes(16));

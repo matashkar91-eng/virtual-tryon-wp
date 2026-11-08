@@ -63,6 +63,13 @@ final class Provider {
         if (is_wp_error($product)) {
             return $product;
         }
+        $category = isset($job['category']) ? (string) $job['category'] : '';
+        $product_detail = self::product_detail($product, $category);
+        // A site product photo may contain another model. Put the automatically
+        // extracted fabric/detail first so the provider sees a product design,
+        // then keep the original store photo only as drape/context.
+        $product_design = is_array($product_detail) ? $product_detail : $product;
+        $has_product_context = !hash_equals(hash('sha256', $product_design['bytes']), hash('sha256', $product['bytes']));
         $prompt = isset($job['prompt']) ? (string) $job['prompt'] : (string) $settings['prompt'];
         $prompt = strtr($prompt, array(
             '{product}' => isset($job['product_name']) ? (string) $job['product_name'] : '',
@@ -70,8 +77,7 @@ final class Provider {
         ));
         // Establish non-negotiable image roles and replacement requirements even
         // when a merchant supplies a short or ambiguous custom prompt.
-        $category = isset($job['category']) ? (string) $job['category'] : '';
-        $prompt = self::replacement_instructions($category) . "\n\nMerchant instructions:\n" . $prompt;
+        $prompt = self::replacement_instructions($category, $has_product_context) . "\n\nMerchant instructions:\n" . $prompt;
         $boundary = 'vto-' . bin2hex(random_bytes(18));
         $body = self::field($boundary, 'model', $model)
             . self::field($boundary, 'prompt', substr($prompt, 0, 12000))
@@ -79,7 +85,8 @@ final class Provider {
             . self::field($boundary, 'n', '1')
             . self::field($boundary, 'size', '1024x1024')
             . self::image_part($boundary, 'person', $input)
-            . self::image_part($boundary, 'product', $product)
+            . self::image_part($boundary, 'product-design', $product_design)
+            . ($has_product_context ? self::image_part($boundary, 'product-context', $product) : '')
             . '--' . $boundary . "--\r\n";
 
         $started = self::clock();
@@ -115,13 +122,18 @@ final class Provider {
         return self::with_transport_diagnostics(Provider_Result::decode($response, $job), $transport);
     }
 
-    private static function replacement_instructions(string $category): string {
-        $base = "Image 1 is the consenting customer's photograph. Image 2 is the product reference. "
-            . "Identify and isolate the product itself in Image 2; ignore any model, mannequin, background, text or styling around it. "
-            . "Make a clearly visible replacement in Image 1: completely remove the existing item of the same type and replace it with the exact product from Image 2. "
-            . "Do not preserve, recolor or blend the original item. The result is invalid if the original item remains unchanged or if the distinctive color, print, pattern, border and material details from Image 2 are missing. "
-            . "Preserve the person's identity, face, skin, body proportions, pose, lighting and background. Change only the relevant garment or accessory. Do not add text or logos. "
-            . "These replacement requirements take priority over any conflicting merchant instruction below. ";
+    private static function replacement_instructions(string $category, bool $has_context): string {
+        $base = "Create ONE photorealistic virtual try-on from the supplied references. "
+            . "REFERENCE ROLES — DO NOT SWAP THEM: Image 1 = CUSTOMER and the ONLY identity allowed in the result. Image 2 = exact PRODUCT DESIGN automatically derived from the selected store product photo; it is not an identity reference. ";
+        if ($has_context) {
+            $base .= "Image 3 = the original full STORE PRODUCT PHOTO for drape and scale only. It may contain another model: ignore that person's face, identity, body, clothing, pose and background completely. ";
+        }
+        $base .= "Make a clearly visible replacement in Image 1: completely remove the existing item of the same type and replace it with the selected product shown by Images 2"
+            . ($has_context ? " and 3. " : ". ")
+            . "Use the exact visible colors, motifs, layout, border and material of the selected product. Do not invent, simplify or redesign its print. "
+            . "Do not preserve, recolor or blend the customer's original item. DO NOT return Image 1 unchanged. The result is invalid if the original item remains or the selected product's distinctive design is missing. "
+            . "Preserve the customer's identity, recognizable face, skin, body proportions, pose, lighting and background. Change only the relevant garment or accessory. Do not add text, logos or a watermark. "
+            . "These role and replacement requirements take priority over any conflicting merchant instruction below. ";
         $specific = array(
             'scarf' => "For a scarf or hijab, fully replace the scarf currently covering the head, neck and shoulders. Do not combine the old scarf with the new one. Reproduce the reference scarf's visible print, colors, border and fabric appearance, then drape it naturally around the same person.",
             'clothing' => "For clothing, replace only the selected garment while keeping the person's body, other clothing and accessories unchanged. Match the reference garment's cut, color, print, fabric and visible details.",
@@ -129,6 +141,51 @@ final class Provider {
             'jewelry' => "For jewelry, replace the matching existing accessory and make the exact reference piece clearly visible in its natural wearing position. Preserve the face, skin and all unrelated accessories.",
         );
         return $base . (isset($specific[$category]) ? $specific[$category] : $specific['clothing']);
+    }
+
+    /**
+     * Derive the design reference from the store's own product photograph. The
+     * crop removes most of the other model's face while retaining the scarf on
+     * the head/shoulders and its lower fabric. The original photo remains a
+     * separate context reference. No merchant upload is required.
+     */
+    private static function product_detail(array $image, string $category) {
+        if ('scarf' !== $category || !function_exists('imagecreatefromstring') || !function_exists('imagecopyresampled')) { return null; }
+        $info = @getimagesizefromstring($image['bytes']);
+        if (!$info || $info[0] < 96 || $info[1] < 96 || $info[0] * $info[1] > 12000000) { return null; }
+        $source = null; $detail = null;
+        try {
+            $source = @imagecreatefromstring($image['bytes']);
+            if (!$source) { return null; }
+            $width = imagesx($source); $height = imagesy($source);
+            // Lower-middle detail: keep the draped scarf/pattern while leaving
+            // the product model's face outside the primary design reference.
+            $crop_width = max(64, (int) floor($width * 0.82));
+            $crop_height = max(64, (int) floor($height * 0.58));
+            if ($crop_width > $width || $crop_height > $height) { return null; }
+            $source_x = (int) floor(($width - $crop_width) / 2);
+            $source_y = min($height - $crop_height, (int) floor($height * 0.38));
+            $scale = min(1.0, 1024 / max($crop_width, $crop_height));
+            $target_width = max(64, (int) round($crop_width * $scale));
+            $target_height = max(64, (int) round($crop_height * $scale));
+            $detail = imagecreatetruecolor($target_width, $target_height);
+            if (!$detail) { return null; }
+            $white = imagecolorallocate($detail, 255, 255, 255);
+            imagefill($detail, 0, 0, $white);
+            if (!imagecopyresampled($detail, $source, 0, 0, $source_x, $source_y, $target_width, $target_height, $crop_width, $crop_height)) { return null; }
+            ob_start();
+            $encoded = imagejpeg($detail, null, 92);
+            $bytes = ob_get_clean();
+            if (!$encoded || !is_string($bytes)) { return null; }
+            $validated = self::validate_image($bytes);
+            return is_wp_error($validated) ? null : $validated;
+        } catch (\Throwable $ignored) {
+            if (ob_get_level() > 0) { @ob_end_clean(); }
+            return null;
+        } finally {
+            if ($source) { imagedestroy($source); }
+            if ($detail) { imagedestroy($detail); }
+        }
     }
 
     /**

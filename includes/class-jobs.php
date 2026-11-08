@@ -153,6 +153,8 @@ final class Jobs {
             } else {
                 $result = Provider::generate($job);
             }
+            if (!is_wp_error($result) && $job['mode'] === 'avalai') { $result = Provider_Result::ensure_changed($result, $job['input_path']); }
+            if (is_wp_error($result) && $result->get_error_code() === 'vto_provider_unchanged') { self::discard_reference($id); }
             if (!is_wp_error($result)) { $result = Storage::save($result['bytes']); }
             $data = ['updated_at' => gmdate('Y-m-d H:i:s')];
             if (is_wp_error($result)) {
@@ -204,6 +206,15 @@ final class Jobs {
         }
     }
 
+    /** Remove a provider URL once its image is known to be an invalid result. */
+    private static function discard_reference(int $id): void {
+        global $wpdb;
+        $job = self::by_id($id);
+        if (!$job || empty($job['reference_path'])) { return; }
+        Storage::delete((string) $job['reference_path']);
+        $wpdb->update(self::table(), ['reference_path' => ''], ['id' => $id]);
+    }
+
     /** Download a previously produced result. This path never calls generate(). */
     public static function recover(int $id) {
         global $wpdb;
@@ -218,6 +229,8 @@ final class Jobs {
         if ($claimed !== 1) { return new \WP_Error('recovery_limit', 'وضعیت درخواست تغییر کرده یا سقف سه تلاش برای دریافت نتیجه تکمیل شده است.'); }
         try {
             $result = Provider_Result::fetch($url);
+            if (!is_wp_error($result) && $job['mode'] === 'avalai') { $result = Provider_Result::ensure_changed($result, $job['input_path']); }
+            if (is_wp_error($result) && $result->get_error_code() === 'vto_provider_unchanged') { self::discard_reference($id); }
             if (!is_wp_error($result)) { $result = Storage::save($result['bytes']); }
             $data = ['updated_at' => gmdate('Y-m-d H:i:s')];
             if (is_wp_error($result)) {
@@ -247,6 +260,9 @@ final class Jobs {
             return new \WP_Error('retry_unavailable', 'فقط درخواست ناموفق و منقضی‌نشده با عکس موجود قابل تکرار است.');
         }
         if ((int) $job['attempts'] >= 3) { return new \WP_Error('retry_limit', 'سقف سه تلاش برای این درخواست تکمیل شده است.'); }
+        if ($job['error_code'] === 'vto_provider_unchanged') {
+            return new \WP_Error('unchanged_requires_new_request', 'سرویس عکس را تغییر نداده است. برای جلوگیری از مصرف دوباره، این درخواست عیناً تکرار نمی‌شود؛ پس از اصلاح عکس محصول یا تنظیمات، درخواست تازه بسازید.');
+        }
         if (!empty($job['reference_path'])) {
             return new \WP_Error('result_available', 'نشانی نتیجهٔ قبلی ذخیره شده است؛ ابتدا از «دریافت دوبارهٔ نتیجه» استفاده کنید.');
         }

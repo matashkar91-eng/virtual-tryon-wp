@@ -57,6 +57,9 @@ try {
     $image = imagecreatetruecolor(128, 128);
     imagefill($image, 0, 0, imagecolorallocate($image, 90, 100, 155));
     ob_start(); imagepng($image); $png = ob_get_clean(); imagedestroy($image);
+    $result_image = imagecreatetruecolor(128, 128);
+    imagefill($result_image, 0, 0, imagecolorallocate($result_image, 35, 175, 85));
+    ob_start(); imagepng($result_image); $result_png = ob_get_clean(); imagedestroy($result_image);
     $uploaded = wp_upload_bits('vto-integration-product.png', null, $png);
     check(empty($uploaded['error']), 'Product fixture image created');
     $attachment_id = wp_insert_attachment(['post_title'=>'VTO test reference', 'post_mime_type'=>'image/png', 'post_status'=>'inherit'], $uploaded['file']);
@@ -101,16 +104,18 @@ try {
     $calls = 0;
     $replacement_prompt_seen = false;
     $scarf_prompt_seen = false;
-    $http_filter = function($pre, $args, $url) use (&$calls, &$replacement_prompt_seen, &$scarf_prompt_seen, $png) {
+    $http_filter = function($pre, $args, $url) use (&$calls, &$replacement_prompt_seen, &$scarf_prompt_seen, $result_png) {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
         $calls++;
-        check(substr_count($args['body'], 'name="image[]"') === 2, 'AI edit request contains person and product images');
+        check(substr_count($args['body'], 'name="image[]"') === 3, 'AI edit request contains customer, derived design and original store-product context images');
         check(multipart_field_values($args['body'], 'quality') === ['low'], 'AI edit request sends the snapshotted low quality exactly once');
-        $replacement_prompt_seen = substr_count($args['body'], 'name="prompt"') === 1 && str_contains($args['body'], 'The result is invalid if the original item remains unchanged');
+        check(multipart_field_values($args['body'], 'complexity') === [], 'Default request omits optional complexity exactly like the proven low-cost workflow');
+        $replacement_prompt_seen = substr_count($args['body'], 'name="prompt"') === 1 && str_contains($args['body'], 'DO NOT return Image 1 unchanged');
         $scarf_prompt_seen = str_contains($args['body'], 'fully replace the scarf currently covering the head, neck and shoulders') && str_contains($args['body'], 'Merchant instructions:');
         check(str_contains($args['body'], 'filename="person.png"') || str_contains($args['body'], 'filename="person.jpg"'), 'Customer image role is explicit');
+        check(str_contains($args['body'], 'filename="product-design.jpg"') && str_contains($args['body'], 'filename="product-context.png"'), 'Derived site-photo detail is Image 2 and full site product photo is context only');
         check($args['sslverify'] === true && $args['redirection'] === 0, 'Provider preserves TLS and does not forward credentials through redirects');
-        return ['headers'=>[], 'response'=>['code'=>200,'message'=>'OK'], 'body'=>wp_json_encode(['data'=>[['b64_json'=>base64_encode($png)]]]), 'cookies'=>[]];
+        return ['headers'=>[], 'response'=>['code'=>200,'message'=>'OK'], 'body'=>wp_json_encode(['data'=>[['b64_json'=>base64_encode($result_png)]]]), 'cookies'=>[]];
     };
     add_filter('pre_http_request', $http_filter, 10, 3);
     VTO\Jobs::process($id);
@@ -132,8 +137,24 @@ try {
     check($replacement_prompt_seen, 'Provider rejects an unchanged original item in its fixed edit instructions');
     check($scarf_prompt_seen, 'Scarf edit explicitly replaces the worn scarf while retaining merchant instructions');
     remove_filter('pre_http_request', $http_filter, 10);
+    $unchanged_calls = 0;
+    $http_filter = function($pre, $args, $url) use (&$unchanged_calls, $png) {
+        if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
+        $unchanged_calls++;
+        return ['headers'=>[], 'response'=>['code'=>200,'message'=>'OK'], 'body'=>wp_json_encode(['data'=>[['b64_json'=>base64_encode($png)]]]), 'cookies'=>[]];
+    };
+    add_filter('pre_http_request', $http_filter, 10, 3);
+    $unchanged_input = VTO\Storage::save($png); $temporary_paths[] = $unchanged_input;
+    $unchanged_job = VTO\Jobs::create(VTO\Catalog::find('wc:'.$product_id), $unchanged_input);
+    $created_jobs[] = $unchanged_job['id'];
+    VTO\Jobs::process($unchanged_job['id']);
+    $unchanged_row = VTO\Jobs::by_id($unchanged_job['id']);
+    $unchanged_retry = VTO\Jobs::retry($unchanged_job['id']);
+    check($unchanged_row['status'] === 'failed' && $unchanged_row['error_code'] === 'vto_provider_unchanged' && $unchanged_calls === 1, 'A provider output matching the customer photo is never marked complete');
+    check(is_wp_error($unchanged_retry) && $unchanged_retry->get_error_code() === 'unchanged_requires_new_request', 'An unchanged output is not resubmitted and cannot consume a second paid attempt');
+    remove_filter('pre_http_request', $http_filter, 10);
     $live_row = VTO\Jobs::by_id($live['id']);
-    $response_body = ['data'=>[['b64_json'=>base64_encode($png)]]];
+    $response_body = ['data'=>[['b64_json'=>base64_encode($result_png)]]];
     $response_code = 200;
     $provider_calls = 0;
     $last_provider_body = '';

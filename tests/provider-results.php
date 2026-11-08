@@ -36,6 +36,7 @@ try {
     update_option('vto_settings',$settings,false);
     VTO\Jobs::install();
     $image=imagecreatetruecolor(128,128);imagefill($image,0,0,imagecolorallocate($image,110,100,160));ob_start();imagepng($image);$png=ob_get_clean();imagedestroy($image);
+    $result_image=imagecreatetruecolor(128,128);imagefill($result_image,0,0,imagecolorallocate($result_image,30,175,90));ob_start();imagepng($result_image);$result_png=ob_get_clean();imagedestroy($result_image);
     $upload=wp_upload_bits('vto-result-product.png',null,$png);
     result_check(empty($upload['error']), 'Product reference fixture prepared');
     $attachment_id=wp_insert_attachment(['post_title'=>'Result test reference','post_mime_type'=>'image/png','post_status'=>'inherit'],$upload['file']);
@@ -51,7 +52,7 @@ try {
     $get_arguments=[];
     $active_job_id=0;
     $reference_visible_at_fetch=false;
-    $filter=function($pre,$args,$target) use (&$post_count,&$get_count,&$download_mode,&$post_response,&$get_arguments,&$active_job_id,&$reference_visible_at_fetch,$png) {
+    $filter=function($pre,$args,$target) use (&$post_count,&$get_count,&$download_mode,&$post_response,&$get_arguments,&$active_job_id,&$reference_visible_at_fetch,$png,$result_png) {
         if($target===VTO\Provider::ENDPOINT){
             $post_count++;
             result_check(strtoupper($args['method']??'POST')==='POST', 'Billable request uses expected generation endpoint');
@@ -66,7 +67,7 @@ try {
             if($download_mode==='redirect'){return response_fixture('',302,['location'=>'https://127.0.0.1/private']);}
             if($download_mode==='public_redirect' && !str_contains($target,'/safe-final.png')){return response_fixture('',302,['location'=>'https://1.1.1.1/safe-final.png']);}
             if($download_mode==='redirect_loop'){return response_fixture('',302,['location'=>'https://1.1.1.1/loop.png']);}
-            return response_fixture($png,200,['content-type'=>'image/png']);
+            return response_fixture($download_mode==='unchanged' ? $png : $result_png,200,['content-type'=>'image/png']);
         }
         // A bug must not turn this suite into any real network request.
         return new WP_Error('vto_test_unexpected_network','Unexpected outbound request blocked by test.');
@@ -84,7 +85,7 @@ try {
     $row=VTO\Jobs::by_id($first['id']);
     result_check($row['status']==='completed' && $post_count===1 && $get_count===1, 'Standard URL result completes with one paid POST and one result GET');
     result_check($reference_visible_at_fetch, 'Signed result reference is durably committed before its first network download');
-    result_check(VTO\Storage::owns($row['output_path']) && file_get_contents($row['output_path'])===$png, 'Downloaded provider image is saved in private storage');
+    result_check(VTO\Storage::owns($row['output_path']) && file_get_contents($row['output_path'])===$result_png, 'Downloaded provider image is saved in private storage');
     result_check(strtoupper($get_arguments['method']??'GET')==='GET' && empty($get_arguments['headers']['Authorization']) && empty($get_arguments['headers']['Cookie']) && empty($get_arguments['cookies']), 'Result GET sends neither provider authorization nor cookies');
     result_check(!empty($get_arguments['sslverify']) && !empty($get_arguments['reject_unsafe_urls']) && $get_arguments['redirection']<=3 && $get_arguments['limit_response_size']<=VTO\Provider::MAX_IMAGE_BYTES+1, 'Result download preserves TLS and bounds redirects and response bytes');
     result_check($get_arguments['timeout'] > 30 && $get_arguments['timeout'] <= VTO\Provider_Result::DOWNLOAD_TIMEOUT, 'Result download is not cut off by the previous 30-second deadline');
@@ -93,6 +94,17 @@ try {
     result_check(!str_contains(wp_json_encode($public),'PRIVATE_RESULT_SIGNATURE') && !array_key_exists('reference_path',$public), 'Public job status never exposes signed result URL or private reference path');
     VTO\Jobs::process($first['id']);
     result_check($post_count===1 && (int)VTO\Jobs::by_id($first['id'])['attempts']===1, 'Completed URL request cannot be accidentally submitted twice');
+    $download_mode='unchanged';
+    $unchanged=$create();$active_job_id=$unchanged['id'];
+    $before_unchanged=[$post_count,$get_count];
+    VTO\Jobs::process($unchanged['id']);
+    $unchanged_row=VTO\Jobs::by_id($unchanged['id']);
+    $unchanged_status_request=new WP_REST_Request('GET','/vto/v1/jobs/'.$unchanged['token']);$unchanged_status_request['token']=$unchanged['token'];
+    $unchanged_public=VTO\Rest::status($unchanged_status_request)->get_data();
+    $unchanged_retry=VTO\Jobs::retry($unchanged['id']);
+    result_check($unchanged_row['status']==='failed' && $unchanged_row['error_code']==='vto_provider_unchanged' && empty($unchanged_row['reference_path']), 'URL output matching the customer photo is rejected and its saved provider link is discarded');
+    result_check($unchanged_public['status']==='failed' && is_wp_error($unchanged_retry) && $unchanged_retry->get_error_code()==='unchanged_requires_new_request', 'Unchanged URL output cannot be delivered through browser fallback or resubmitted for another charge');
+    result_check([$post_count,$get_count]===[$before_unchanged[0]+1,$before_unchanged[1]+1], 'Unchanged URL validation uses one generation POST and one result GET only');
     $download_mode='transport';
     $failed=$create();VTO\Jobs::process($failed['id']);
     $failed_row=VTO\Jobs::by_id($failed['id']);
@@ -146,7 +158,7 @@ try {
     $blocked_redirect = VTO\Provider_Result::fetch($url);
     result_check(is_wp_error($blocked_redirect), 'Redirect to private-network destination is rejected');
     $download_mode='public_redirect';$before_redirect=$get_count;$redirected=VTO\Provider_Result::fetch($url);
-    result_check(!is_wp_error($redirected) && $redirected['bytes']===$png && $get_count===$before_redirect+2, 'Safe public HTTPS redirect is followed with bounded GET-only requests');
+    result_check(!is_wp_error($redirected) && $redirected['bytes']===$result_png && $get_count===$before_redirect+2, 'Safe public HTTPS redirect is followed with bounded GET-only requests');
     $download_mode='redirect_loop';$before_loop=$get_count;
     result_check(is_wp_error(VTO\Provider_Result::fetch($url)) && $get_count-$before_loop<=4, 'Redirect loops stop after the configured hop limit');
     foreach(['http://1.1.1.1/photo.png','https://127.0.0.1/private','https://[::1]/private','https://user:password@1.1.1.1/private','file:///etc/passwd','https://1.1.1.1:8443/private'] as $unsafe_url){
@@ -158,7 +170,7 @@ try {
     result_check(!is_wp_error($decoded) && $decoded['bytes']===$png, 'Legacy b64_json image response remains supported');
     $before_schema_get=$get_count;
     $avalai_url_result=VTO\Provider_Result::decode(response_fixture(['data'=>[['b64_json'=>'','revised_prompt'=>'safe test prompt','url'=>$url]]]),[]);
-    result_check(!is_wp_error($avalai_url_result) && $avalai_url_result['bytes']===$png && $get_count===$before_schema_get+1, 'AvalAI empty base64 plus URL response downloads the existing result with one GET');
+    result_check(!is_wp_error($avalai_url_result) && $avalai_url_result['bytes']===$result_png && $get_count===$before_schema_get+1, 'AvalAI empty base64 plus URL response downloads the existing result with one GET');
     if(!is_wp_error($avalai_url_result) && !empty($avalai_url_result['recovery_path'])){VTO\Storage::delete($avalai_url_result['recovery_path']);}
     $unknown=VTO\Provider_Result::decode(response_fixture(['secret_token'=>'TOP_SECRET_VALUE','customer_photo'=>'RAW_PHOTO_BYTES','extra'=>['token'=>'NESTED_SECRET']]),[]);
     result_check(is_wp_error($unknown), 'Unknown successful response schema is diagnosed rather than treated as completion');

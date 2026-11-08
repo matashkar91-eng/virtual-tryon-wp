@@ -111,15 +111,16 @@ final class Rest {
     public static function status(\WP_REST_Request $request) {
         $job = Jobs::by_token($request['token']);
         if (!$job) { return new \WP_Error('not_found', 'درخواست موجود نیست یا زمان نگهداری آن پایان یافته است.', ['status' => 404]); }
-        $remote_ready = !is_wp_error(self::provider_reference($job));
-        $public_status = $remote_ready ? 'completed' : $job['status'];
+        // A retained provider URL has not passed the local unchanged-image
+        // check. Never present it to a customer as a verified completed result;
+        // an administrator can inspect and import that existing file instead.
+        $public_status = $job['status'];
         $messages = [
             'queued' => 'درخواست در صف است. می‌توانید بعداً با همین لینک نتیجه را ببینید.',
             'processing' => 'تصویر در حال پردازش است؛ این صفحه را دوباره ارسال نکنید.',
             'completed' => $job['mode'] === 'demo' ? 'آزمایش مسیر انجام شد؛ این تصویر اصلی شماست و پرو واقعی انجام نشده است.' : 'تصویر آماده است.',
             'failed' => $job['error_message'],
         ];
-        if ($remote_ready) { $messages['completed'] = 'تصویر در سرویس آماده است و مستقیماً در مرورگر شما دریافت می‌شود.'; }
         $image = $public_status === 'completed' ? rest_url('vto/v1/jobs/' . $request['token'] . '/image') : null;
         return self::response([
             'status' => $public_status, 'message' => $messages[$public_status] ?? '',
@@ -131,8 +132,6 @@ final class Rest {
     public static function image(\WP_REST_Request $request) {
         $job = Jobs::by_token($request['token']);
         if (!$job) { return new \WP_Error('not_found', 'تصویر موجود نیست یا منقضی شده است.', ['status' => 404]); }
-        $reference = self::provider_reference($job);
-        if (!is_wp_error($reference)) { return self::provider_redirect($reference); }
         if ($job['status'] !== 'completed') { return new \WP_Error('not_found', 'تصویر موجود نیست یا منقضی شده است.', ['status' => 404]); }
         return self::stream($job['output_path'], !empty($request['download']));
     }

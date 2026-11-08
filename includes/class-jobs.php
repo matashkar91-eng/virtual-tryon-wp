@@ -253,6 +253,76 @@ final class Jobs {
         }
     }
 
+    /**
+     * Save an already-generated provider result supplied by an administrator's
+     * browser. This is the last-resort path for hosts that can call AvalAI but
+     * cannot download the signed result CDN URL. It never calls generate() and
+     * therefore cannot submit or bill a second image-generation request.
+     */
+    public static function import_result(int $id, string $bytes) {
+        global $wpdb;
+        $job = self::by_id($id);
+        if (!$job || $job['status'] !== 'failed' || empty($job['reference_path'])
+            || $job['expires_at'] <= gmdate('Y-m-d H:i:s')) {
+            return new \WP_Error('import_unavailable', 'فقط خروجی موجود و منقضی‌نشدهٔ یک درخواست ناموفق قابل ثبت است.');
+        }
+        $url = Storage::read_reference((string) $job['reference_path']);
+        if (is_wp_error($url) || !Provider_Result::valid_reference_url((string) $url)) {
+            return new \WP_Error('import_unavailable', 'نشانی خصوصی نتیجه موجود نیست یا منقضی شده است.');
+        }
+        $table = self::table();
+        $claimed = $wpdb->query($wpdb->prepare(
+            "UPDATE $table SET status='processing', updated_at=%s WHERE id=%d AND status='failed' AND expires_at > %s",
+            gmdate('Y-m-d H:i:s'), $id, gmdate('Y-m-d H:i:s')
+        ));
+        if ($claimed !== 1) {
+            return new \WP_Error('import_conflict', 'وضعیت درخواست تغییر کرده است؛ صفحه را تازه کنید.');
+        }
+        try {
+            $checked = Provider_Result::ensure_changed(array('bytes' => $bytes), (string) $job['input_path']);
+            if (is_wp_error($checked)) {
+                if ($checked->get_error_code() === 'vto_provider_unchanged') { self::discard_reference($id); }
+                self::fail_import($id, $checked);
+                return $checked;
+            }
+            $path = Storage::save($bytes);
+            if (is_wp_error($path)) {
+                $error = new \WP_Error('vto_result_import', 'فایل انتخاب‌شده تصویر معتبر خروجی نیست یا ذخیره نشد.');
+                self::fail_import($id, $error);
+                return $error;
+            }
+            $updated = $wpdb->update($table, array(
+                'status' => 'completed', 'output_path' => $path,
+                'error_code' => '', 'error_message' => '', 'error_detail' => '',
+                'updated_at' => gmdate('Y-m-d H:i:s'),
+            ), array('id' => $id, 'status' => 'processing'));
+            if (!$updated) {
+                Storage::delete($path);
+                $error = new \WP_Error('import_conflict', 'وضعیت درخواست هنگام ذخیره تغییر کرد؛ صفحه را تازه کنید.');
+                self::fail_import($id, $error);
+                return $error;
+            }
+            self::clear_reference($id);
+            return true;
+        } catch (\Throwable $error) {
+            $safe = new \WP_Error('vto_result_import', 'ثبت فایل خروجی کامل نشد؛ فایل دیگری انتخاب کنید یا با پشتیبانی تماس بگیرید.');
+            self::fail_import($id, $safe);
+            return $safe;
+        }
+    }
+
+    private static function fail_import(int $id, \WP_Error $error): void {
+        global $wpdb;
+        $detail = $error->get_error_data();
+        $wpdb->update(self::table(), array(
+            'status' => 'failed',
+            'error_code' => sanitize_key($error->get_error_code()),
+            'error_message' => sanitize_text_field($error->get_error_message()),
+            'error_detail' => is_array($detail) && isset($detail['detail']) ? substr(sanitize_text_field($detail['detail']), 0, 1000) : '',
+            'updated_at' => gmdate('Y-m-d H:i:s'),
+        ), array('id' => $id, 'status' => 'processing'));
+    }
+
     public static function retry(int $id) {
         global $wpdb;
         $job = self::by_id($id);

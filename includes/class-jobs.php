@@ -219,7 +219,8 @@ final class Jobs {
     public static function recover(int $id) {
         global $wpdb;
         $job = self::by_id($id);
-        if (!$job || $job['status'] !== 'failed' || empty($job['reference_path']) || $job['expires_at'] <= gmdate('Y-m-d H:i:s')) {
+        if (!$job || $job['status'] !== 'failed' || empty($job['reference_path'])
+            || $job['expires_at'] <= gmdate('Y-m-d H:i:s') || !Storage::owns((string) $job['input_path'])) {
             return new \WP_Error('recovery_unavailable', 'برای این درخواست نشانی نتیجهٔ قابل دریافت وجود ندارد یا زمان نگهداری تمام شده است.');
         }
         $url = Storage::read_reference($job['reference_path']);
@@ -263,7 +264,8 @@ final class Jobs {
         global $wpdb;
         $job = self::by_id($id);
         if (!$job || $job['status'] !== 'failed' || empty($job['reference_path'])
-            || $job['expires_at'] <= gmdate('Y-m-d H:i:s')) {
+            || $job['expires_at'] <= gmdate('Y-m-d H:i:s')
+            || !Storage::owns((string) $job['input_path'])) {
             return new \WP_Error('import_unavailable', 'فقط خروجی موجود و منقضی‌نشدهٔ یک درخواست ناموفق قابل ثبت است.');
         }
         $url = Storage::read_reference((string) $job['reference_path']);

@@ -35,6 +35,7 @@ $old_settings = get_option('vto_settings', null);
 $old_user = get_current_user_id();
 $product_id = 0;
 $attachment_id = 0;
+$gallery_attachment_id = 0;
 $created_jobs = [];
 $temporary_paths = [];
 $http_filter = null;
@@ -64,11 +65,20 @@ try {
     check(empty($uploaded['error']), 'Product fixture image created');
     $attachment_id = wp_insert_attachment(['post_title'=>'VTO test reference', 'post_mime_type'=>'image/png', 'post_status'=>'inherit'], $uploaded['file']);
     update_attached_file($attachment_id, $uploaded['file']);
+    $gallery_image = imagecreatetruecolor(128, 128);
+    imagefill($gallery_image, 0, 0, imagecolorallocate($gallery_image, 170, 75, 95));
+    imagefilledrectangle($gallery_image, 0, 70, 127, 92, imagecolorallocate($gallery_image, 245, 205, 120));
+    ob_start(); imagepng($gallery_image); $gallery_png = ob_get_clean(); imagedestroy($gallery_image);
+    $gallery_uploaded = wp_upload_bits('vto-integration-product-gallery.png', null, $gallery_png);
+    check(empty($gallery_uploaded['error']), 'Existing WooCommerce gallery fixture image created');
+    $gallery_attachment_id = wp_insert_attachment(['post_title'=>'VTO gallery reference', 'post_mime_type'=>'image/png', 'post_status'=>'inherit'], $gallery_uploaded['file']);
+    update_attached_file($gallery_attachment_id, $gallery_uploaded['file']);
     $product = new WC_Product_Simple();
     $product->set_name('روسری آزمایشی');
     $product->set_status('publish');
     $product->set_regular_price('100');
     $product->set_image_id($attachment_id);
+    $product->set_gallery_image_ids([$gallery_attachment_id]);
     $product_id = $product->save();
     $settings['product_ids'] = [$product_id];
     update_option('vto_settings', $settings, false);
@@ -104,14 +114,16 @@ try {
     $calls = 0;
     $replacement_prompt_seen = false;
     $scarf_prompt_seen = false;
-    $http_filter = function($pre, $args, $url) use (&$calls, &$replacement_prompt_seen, &$scarf_prompt_seen, $result_png) {
+    $gallery_prompt_seen = false;
+    $http_filter = function($pre, $args, $url) use (&$calls, &$replacement_prompt_seen, &$scarf_prompt_seen, &$gallery_prompt_seen, $result_png) {
         if ($url !== VTO\Provider::ENDPOINT) { return $pre; }
         $calls++;
         check(substr_count($args['body'], 'name="image[]"') === 3, 'AI edit request contains customer, derived design and original store-product context images');
         check(multipart_field_values($args['body'], 'quality') === ['low'], 'AI edit request sends the snapshotted low quality exactly once');
         check(multipart_field_values($args['body'], 'complexity') === [], 'Default request omits optional complexity exactly like the proven low-cost workflow');
-        $replacement_prompt_seen = substr_count($args['body'], 'name="prompt"') === 1 && str_contains($args['body'], 'DO NOT return Image 1 unchanged');
+        $replacement_prompt_seen = substr_count($args['body'], 'name="prompt"') === 1 && str_contains($args['body'], 'DO NOT return Image 1 unchanged') && str_contains($args['body'], 'NEWLY RENDERED');
         $scarf_prompt_seen = str_contains($args['body'], 'fully replace the scarf currently covering the head, neck and shoulders') && str_contains($args['body'], 'Merchant instructions:');
+        $gallery_prompt_seen = str_contains($args['body'], 'store-gallery photos') && str_contains($args['body'], 'detail views of the SAME selected product');
         check(str_contains($args['body'], 'filename="person.png"') || str_contains($args['body'], 'filename="person.jpg"'), 'Customer image role is explicit');
         check(str_contains($args['body'], 'filename="product-design.jpg"') && str_contains($args['body'], 'filename="product-context.png"'), 'Derived site-photo detail is Image 2 and full site product photo is context only');
         check($args['sslverify'] === true && $args['redirection'] === 0, 'Provider preserves TLS and does not forward credentials through redirects');
@@ -136,6 +148,7 @@ try {
     check(is_wp_error(VTO\Jobs::run_queued_now($live['id'])) && (int) VTO\Jobs::by_id($live['id'])['attempts'] === 1, 'Run-now action cannot duplicate a completed paid request');
     check($replacement_prompt_seen, 'Provider rejects an unchanged original item in its fixed edit instructions');
     check($scarf_prompt_seen, 'Scarf edit explicitly replaces the worn scarf while retaining merchant instructions');
+    check($gallery_prompt_seen, 'Provider composes existing WooCommerce gallery photos into one product-design role without extra API images');
     remove_filter('pre_http_request', $http_filter, 10);
     $unchanged_calls = 0;
     $http_filter = function($pre, $args, $url) use (&$unchanged_calls, $png) {
@@ -366,6 +379,7 @@ try {
     foreach ($temporary_paths as $path) { if (is_string($path)) { VTO\Storage::delete($path); } }
     if ($product_id) { wp_delete_post($product_id, true); }
     if ($attachment_id) { wp_delete_attachment($attachment_id, true); }
+    if ($gallery_attachment_id) { wp_delete_attachment($gallery_attachment_id, true); }
     if ($old_settings === null) { delete_option('vto_settings'); } else { update_option('vto_settings', $old_settings, false); }
     wp_set_current_user($old_user);
 }

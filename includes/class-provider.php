@@ -64,11 +64,12 @@ final class Provider {
             return $product;
         }
         $category = isset($job['category']) ? (string) $job['category'] : '';
-        $product_detail = self::product_detail($product, $category);
+        $design = self::product_design($job, $product, $category);
         // A site product photo may contain another model. Put the automatically
-        // extracted fabric/detail first so the provider sees a product design,
-        // then keep the original store photo only as drape/context.
-        $product_design = is_array($product_detail) ? $product_detail : $product;
+        // extracted fabric/detail board first so the provider sees the product
+        // consistently across existing gallery photos, then keep the original
+        // store photo only as drape/context.
+        $product_design = $design['image'];
         $has_product_context = !hash_equals(hash('sha256', $product_design['bytes']), hash('sha256', $product['bytes']));
         $prompt = isset($job['prompt']) ? (string) $job['prompt'] : (string) $settings['prompt'];
         $prompt = strtr($prompt, array(
@@ -77,7 +78,7 @@ final class Provider {
         ));
         // Establish non-negotiable image roles and replacement requirements even
         // when a merchant supplies a short or ambiguous custom prompt.
-        $prompt = self::replacement_instructions($category, $has_product_context) . "\n\nMerchant instructions:\n" . $prompt;
+        $prompt = self::replacement_instructions($category, $has_product_context, $design['board']) . "\n\nMerchant instructions:\n" . $prompt;
         $boundary = 'vto-' . bin2hex(random_bytes(18));
         $body = self::field($boundary, 'model', $model)
             . self::field($boundary, 'prompt', substr($prompt, 0, 12000))
@@ -122,17 +123,20 @@ final class Provider {
         return self::with_transport_diagnostics(Provider_Result::decode($response, $job), $transport);
     }
 
-    private static function replacement_instructions(string $category, bool $has_context): string {
-        $base = "Create ONE photorealistic virtual try-on from the supplied references. "
-            . "REFERENCE ROLES — DO NOT SWAP THEM: Image 1 = CUSTOMER and the ONLY identity allowed in the result. Image 2 = exact PRODUCT DESIGN automatically derived from the selected store product photo; it is not an identity reference. ";
+    private static function replacement_instructions(string $category, bool $has_context, bool $has_design_board): string {
+        $base = "Create ONE NEWLY RENDERED photorealistic portrait from the supplied references. This must be a newly generated portrait, not a copy or minimal recolor of Image 1. "
+            . "REFERENCE ROLES — DO NOT SWAP THEM: Image 1 = CUSTOMER and the ONLY identity allowed in the result; use it as the identity reference, not as pixels to return unchanged. Image 2 = exact PRODUCT DESIGN "
+            . ($has_design_board ? "board automatically composed from detail crops of the selected product's existing store-gallery photos" : "automatically derived from the selected store product photo")
+            . "; it is not an identity reference. ";
         if ($has_context) {
             $base .= "Image 3 = the original full STORE PRODUCT PHOTO for drape and scale only. It may contain another model: ignore that person's face, identity, body, clothing, pose and background completely. ";
         }
-        $base .= "Make a clearly visible replacement in Image 1: completely remove the existing item of the same type and replace it with the selected product shown by Images 2"
+        $base .= "Reconstruct the customer as the same recognizable person in a natural portrait and make a clearly visible product replacement: completely remove the existing item of the same type and replace it with the selected product shown by Images 2"
             . ($has_context ? " and 3. " : ". ")
+            . ($has_design_board ? "The panels in Image 2 are detail views of the SAME selected product; combine their consistent product evidence, never their people or backgrounds. " : "")
             . "Use the exact visible colors, motifs, layout, border and material of the selected product. Do not invent, simplify or redesign its print. "
             . "Do not preserve, recolor or blend the customer's original item. DO NOT return Image 1 unchanged. The result is invalid if the original item remains or the selected product's distinctive design is missing. "
-            . "Preserve the customer's identity, recognizable face, skin, body proportions, pose, lighting and background. Change only the relevant garment or accessory. Do not add text, logos or a watermark. "
+            . "Preserve the customer's identity, recognizable facial structure, skin and body proportions. A natural reconstruction of pose, lighting and background is allowed when needed to make the selected product unmistakable. Change only the relevant garment or accessory. Do not add text, logos or a watermark. "
             . "These role and replacement requirements take priority over any conflicting merchant instruction below. ";
         $specific = array(
             'scarf' => "For a scarf or hijab, fully replace the scarf currently covering the head, neck and shoulders. Do not combine the old scarf with the new one. Reproduce the reference scarf's visible print, colors, border and fabric appearance, then drape it naturally around the same person.",
@@ -141,6 +145,97 @@ final class Provider {
             'jewelry' => "For jewelry, replace the matching existing accessory and make the exact reference piece clearly visible in its natural wearing position. Preserve the face, skin and all unrelated accessories.",
         );
         return $base . (isset($specific[$category]) ? $specific[$category] : $specific['clothing']);
+    }
+
+    /**
+     * Build one design reference from product photos already stored in
+     * WooCommerce. Gallery photos are never sent as extra API images: their
+     * lower fabric regions are combined into a single bounded detail board, so
+     * request image count and provider quality settings remain unchanged.
+     */
+    private static function product_design(array $job, array $primary, string $category): array {
+        if ('scarf' !== $category) { return array('image' => $primary, 'board' => false); }
+        $details = array();
+        foreach (self::site_product_images($job, $primary) as $image) {
+            $detail = self::product_detail($image, $category);
+            if (!is_array($detail)) { continue; }
+            $hash = hash('sha256', $detail['bytes']);
+            if (isset($details[$hash])) { continue; }
+            $details[$hash] = $detail;
+            if (count($details) >= 3) { break; }
+        }
+        $details = array_values($details);
+        if (count($details) > 1) {
+            $board = self::detail_board($details);
+            if (is_array($board)) { return array('image' => $board, 'board' => true); }
+        }
+        return array('image' => isset($details[0]) ? $details[0] : $primary, 'board' => false);
+    }
+
+    /** Existing local WooCommerce gallery photos, primary first and unique. */
+    private static function site_product_images(array $job, array $primary): array {
+        $images = array($primary);
+        $seen = array(hash('sha256', $primary['bytes']) => true);
+        if (!function_exists('wc_get_product') || !isset($job['product_id'])
+            || !preg_match('/^wc:(\d+)$/D', (string) $job['product_id'], $match)) {
+            return $images;
+        }
+        $product = wc_get_product(absint($match[1]));
+        if (!$product || !method_exists($product, 'get_gallery_image_ids')) { return $images; }
+        foreach ((array) $product->get_gallery_image_ids() as $attachment_id) {
+            $image = self::attachment_image(absint($attachment_id));
+            if (!is_array($image)) { continue; }
+            $hash = hash('sha256', $image['bytes']);
+            if (isset($seen[$hash])) { continue; }
+            $seen[$hash] = true;
+            $images[] = $image;
+            if (count($images) >= 3) { break; }
+        }
+        return $images;
+    }
+
+    /** Compose up to three already-reduced detail crops into one 1024px board. */
+    private static function detail_board(array $details) {
+        if (!function_exists('imagecreatefromstring') || !function_exists('imagecopyresampled')) { return null; }
+        $details = array_slice($details, 0, 3);
+        if (count($details) < 2) { return isset($details[0]) ? $details[0] : null; }
+        $canvas = null;
+        try {
+            $side = 1024; $cell = 512; $margin = 14;
+            $canvas = imagecreatetruecolor($side, $side);
+            if (!$canvas) { return null; }
+            $white = imagecolorallocate($canvas, 255, 255, 255);
+            $border = imagecolorallocate($canvas, 225, 225, 225);
+            imagefill($canvas, 0, 0, $white);
+            $slots = count($details) === 2
+                ? array(array(0, 256, 512, 512), array(512, 256, 512, 512))
+                : array(array(0, 0, 512, 512), array(512, 0, 512, 512), array(256, 512, 512, 512));
+            foreach ($details as $index => $detail) {
+                $source = @imagecreatefromstring($detail['bytes']);
+                if (!$source) { continue; }
+                [$x, $y, $width, $height] = $slots[$index];
+                imagerectangle($canvas, $x + $margin - 1, $y + $margin - 1, $x + $width - $margin, $y + $height - $margin, $border);
+                $available_width = $width - 2 * $margin; $available_height = $height - 2 * $margin;
+                $scale = min($available_width / imagesx($source), $available_height / imagesy($source));
+                $target_width = max(1, (int) round(imagesx($source) * $scale));
+                $target_height = max(1, (int) round(imagesy($source) * $scale));
+                $target_x = $x + (int) floor(($width - $target_width) / 2);
+                $target_y = $y + (int) floor(($height - $target_height) / 2);
+                imagecopyresampled($canvas, $source, $target_x, $target_y, 0, 0, $target_width, $target_height, imagesx($source), imagesy($source));
+                imagedestroy($source);
+            }
+            ob_start();
+            $encoded = imagejpeg($canvas, null, 92);
+            $bytes = ob_get_clean();
+            if (!$encoded || !is_string($bytes)) { return null; }
+            $validated = self::validate_image($bytes);
+            return is_wp_error($validated) ? null : $validated;
+        } catch (\Throwable $ignored) {
+            if (ob_get_level() > 0) { @ob_end_clean(); }
+            return null;
+        } finally {
+            if ($canvas) { imagedestroy($canvas); }
+        }
     }
 
     /**
@@ -463,13 +558,8 @@ final class Provider {
         // Use an attachment on disk when possible. This avoids sending a request
         // to a store whose hostname resolves to a private address on the server.
         if (!empty($job['product_image_id'])) {
-            $path = get_attached_file(absint($job['product_image_id']));
-            $uploads = wp_upload_dir();
-            $base = realpath($uploads['basedir']);
-            $real = is_string($path) ? realpath($path) : false;
-            if ($base && $real && 0 === strpos($real, $base . DIRECTORY_SEPARATOR)) {
-                return self::local_image($real);
-            }
+            $local = self::attachment_image(absint($job['product_image_id']));
+            if (is_array($local)) { return $local; }
         }
         $url = isset($job['product_image']) ? (string) $job['product_image'] : '';
         if (!wp_http_validate_url($url)) {
@@ -490,6 +580,18 @@ final class Provider {
             return self::error('vto_product_image', 'عکس محصول باید JPEG، PNG یا WebP معتبر با حجم حداکثر ۱۵ مگابایت باشد.', 'Product image failed MIME, dimensions or size validation.');
         }
         return $image;
+    }
+
+    /** Load only a real local media-library file inside the uploads directory. */
+    private static function attachment_image(int $attachment_id) {
+        if ($attachment_id < 1) { return null; }
+        $path = get_attached_file($attachment_id);
+        $uploads = wp_upload_dir();
+        $base = realpath($uploads['basedir']);
+        $real = is_string($path) ? realpath($path) : false;
+        if (!$base || !$real || 0 !== strpos($real, $base . DIRECTORY_SEPARATOR)) { return null; }
+        $image = self::local_image($real);
+        return is_wp_error($image) ? null : $image;
     }
 
     private static function local_image($path) {

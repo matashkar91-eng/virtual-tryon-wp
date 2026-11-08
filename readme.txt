@@ -4,7 +4,7 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.3.0
+Stable tag: 0.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -17,8 +17,11 @@ and place [virtual_tryon] on a page. Start in demo mode.
 See README.md for private storage, cron, privacy and deployment requirements.
 
 == External services ==
-When AvalAI mode is enabled, a customer's photo, product image and prompt are
-sent server-side to https://api.avalai.ir/v1/images/edits using the store's API key.
+When AvalAI mode is enabled, a customer's photo, product images already stored
+in WooCommerce and the prompt are sent server-side to
+https://api.avalai.ir/v1/images/edits using the store's API key. Up to three
+product photos may be processed locally into one bounded design board; the
+provider request still sends at most one design board and one full product photo.
 No images are sent to AvalAI in demo mode. An explicit administrator connection
 check sends the saved API key to GET https://api.avalai.ir/v1/models, including
 when demo is selected. It retrieves model availability without generating images.
@@ -29,6 +32,16 @@ quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.3.1 =
+Use the featured image and up to two existing WooCommerce gallery photos to
+build one scarf-design detail board without requiring a separate upload. Ask
+the provider for a newly rendered customer portrait, and never expose a signed
+remote result to the customer before local unchanged-image validation. If the
+host cannot download an existing result, an administrator can save and import
+that same file without submitting or billing another generation. This release
+supersedes 0.2.1's customer browser-direct fallback: only a locally stored and
+validated output is now presented to the customer.
+
 = 0.3.0 =
 The plugin now derives a scarf-design detail from the existing WooCommerce
 product photo and sends it before the full store photo. No separate reference
@@ -74,6 +87,15 @@ timeout workaround if you added it in Code Snippets. Existing failed jobs are no
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.3.1 =
+Build a single bounded product-design board from detail crops of the featured
+image and up to two existing WooCommerce gallery photos, while keeping the
+provider request at three images, low quality, 1024x1024 and one output. Require
+a newly rendered portrait that uses the customer photo only for identity.
+Remove the customer-facing redirect to an unvalidated provider result. Add an
+administrator browser-save/import recovery path that performs no generation
+request and rejects an unchanged customer photo before completing the job.
+
 = 0.3.0 =
 Use the store's existing product image to build a model-resistant scarf design
 reference automatically. Send customer identity first, derived product detail

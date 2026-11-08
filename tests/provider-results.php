@@ -145,6 +145,12 @@ try {
     $unchanged_import_row=VTO\Jobs::by_id($unchanged_import['id']);
     result_check(is_wp_error($unchanged_import_result) && $unchanged_import_result->get_error_code()==='vto_provider_unchanged' && $unchanged_import_row['status']==='failed' && empty($unchanged_import_row['reference_path']), 'Browser import rejects the unchanged customer photo and removes its provider reference');
     result_check([$post_count,$get_count]===$unchanged_import_before && is_wp_error(VTO\Jobs::retry($unchanged_import['id'])), 'Rejected unchanged browser result cannot trigger another paid request');
+    $missing_input=$create();VTO\Jobs::process($missing_input['id']);
+    $missing_input_row=VTO\Jobs::by_id($missing_input['id']);
+    VTO\Storage::delete($missing_input_row['input_path']);
+    $missing_input_before=[$post_count,$get_count];
+    result_check(is_wp_error(VTO\Jobs::import_result($missing_input['id'],$result_png)) && is_wp_error(VTO\Jobs::recover($missing_input['id'])), 'Recovery and browser import fail closed when the original customer image is unavailable for unchanged-output comparison');
+    result_check([$post_count,$get_count]===$missing_input_before && VTO\Jobs::by_id($missing_input['id'])['status']==='failed', 'Missing-input recovery performs no provider request and leaves the failed job unchanged');
     $posts_before_recover=$post_count;$gets_before_recover=$get_count;
     $download_mode='image';
     $recovered=VTO\Jobs::recover($failed['id']);

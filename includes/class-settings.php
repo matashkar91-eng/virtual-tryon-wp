@@ -15,6 +15,7 @@ final class Settings {
             'quality' => 'low',
             'category' => 'auto',
             'garment_type' => 'scarf',
+            'catalog_source' => 'designs',
             'prompt' => 'Create a realistic virtual try-on of {product} ({category}) on the person in the input photo. Preserve the person, face, body proportions, pose, lighting and background. Change only the selected garment or accessory. Preserve its material, pattern and colors. Use a clean, natural result.',
             'title' => 'قبل از خرید، روی خودت ببین',
             'subtitle' => 'مدل مورد علاقه‌ات را انتخاب کن، یک عکس واضح بفرست و نتیجهٔ پرو مجازی را ببین.',
@@ -71,11 +72,14 @@ final class Settings {
         if (!current_user_can('manage_options') || !is_array($input)) {
             return $old;
         }
-        $out = self::defaults();
+        // Settings and artwork-library forms save the same option independently.
+        // Omitted fields must never reset credentials, cost, privacy or designs.
+        $out = $old;
         $enums = array(
             'mode' => array('demo', 'avalai'),
             'category' => array('auto', 'tops', 'bottoms', 'one-pieces'),
             'garment_type' => array('scarf', 'clothing', 'glasses', 'jewelry'),
+            'catalog_source' => array('designs', 'woocommerce'),
         );
         foreach ($enums as $key => $values) {
             if (isset($input[$key]) && in_array($input[$key], $values, true)) {
@@ -98,10 +102,10 @@ final class Settings {
             $out[$key] = $color ? $color : $old[$key];
         }
         foreach (array('banner_id', 'logo_id') as $key) {
-            $id = isset($input[$key]) ? absint($input[$key]) : 0;
+            $id = isset($input[$key]) ? absint($input[$key]) : absint($old[$key]);
             $out[$key] = $id && wp_attachment_is_image($id) ? $id : 0;
         }
-        $out['require_login'] = !empty($input['require_login']);
+        $out['require_login'] = array_key_exists('require_login', $input) ? !empty($input['require_login']) : !empty($old['require_login']);
         $out['max_upload_mb'] = max(1, min(12, absint(isset($input['max_upload_mb']) ? $input['max_upload_mb'] : $old['max_upload_mb'])));
         $out['rate_limit'] = max(1, min(50, absint(isset($input['rate_limit']) ? $input['rate_limit'] : $old['rate_limit'])));
         $out['global_rate_limit'] = max(1, min(1000, absint(isset($input['global_rate_limit']) ? $input['global_rate_limit'] : $old['global_rate_limit'])));
@@ -120,13 +124,15 @@ final class Settings {
         } elseif (!empty($input['api_key']) && is_scalar($input['api_key'])) {
             $out['api_key'] = preg_replace('/[\r\n\x00]/', '', trim($input['api_key']));
         }
-        $ids = isset($input['product_ids']) ? $input['product_ids'] : array();
+        $ids = isset($input['product_ids']) ? $input['product_ids'] : $old['product_ids'];
         if (!is_array($ids) && is_scalar($ids)) {
             $ids = preg_split('/[\s,،]+/u', $ids, -1, PREG_SPLIT_NO_EMPTY);
         }
         $ids = is_array($ids) ? array_filter($ids, 'is_scalar') : array();
         $out['product_ids'] = array_values(array_unique(array_filter(array_map('absint', $ids))));
-        $manual = isset($input['manual_products']) && is_array($input['manual_products']) ? $input['manual_products'] : array();
+        $save_designs = array_key_exists('manual_products', $input) || !empty($input['manual_products_present']);
+        $manual = $save_designs ? (isset($input['manual_products']) && is_array($input['manual_products']) ? $input['manual_products'] : array()) : (array) $old['manual_products'];
+        $out['manual_products'] = array();
         $seen = array();
         foreach (array_slice($manual, 0, 100) as $row) {
             if (!is_array($row)) {
@@ -138,18 +144,21 @@ final class Settings {
                 continue;
             }
             $id = !empty($row['id']) ? sanitize_key($row['id']) : 'item-' . $image_id;
-            if (!$id || isset($seen[$id])) {
+            if (!preg_match('/^[a-z0-9_-]{1,80}$/D', $id) || isset($seen[$id])) {
                 continue;
             }
             $seen[$id] = true;
             $category = isset($row['category']) && in_array($row['category'], $enums['category'], true) ? $row['category'] : 'auto';
-            $out['manual_products'][] = array('id' => $id, 'name' => $name, 'image_id' => $image_id, 'category' => $category);
+            $active = !array_key_exists('active', $row) || !empty($row['active']);
+            $out['manual_products'][] = array('id' => $id, 'name' => $name, 'image_id' => $image_id, 'category' => $category, 'active' => $active);
         }
         foreach (array_keys(self::label_names()) as $key) {
             if (isset($input['labels'][$key]) && is_scalar($input['labels'][$key])) {
                 $label = sanitize_textarea_field($input['labels'][$key]);
                 if ($label !== '') {
                     $out['labels'][$key] = $label;
+                } else {
+                    unset($out['labels'][$key]);
                 }
             }
         }
@@ -203,6 +212,19 @@ final class Settings {
             'expires_label' => 'عنوان زمان انقضا',
             'failed_label' => 'عنوان نتیجهٔ ناموفق',
             'javascript_notice' => 'پیام نیاز به فعال‌بودن جاوااسکریپت',
+            'gallery_hint' => 'راهنمای انتخاب طرح',
+            'search_designs' => 'راهنمای جست‌وجوی طرح',
+            'search_empty' => 'پیام نبود نتیجهٔ جست‌وجو',
+            'selection_placeholder' => 'پیام انتخاب‌نشدن طرح',
+            'selection_heading' => 'عنوان خلاصهٔ طرح انتخابی',
+            'ready_message' => 'پیام آماده‌بودن فرم',
+            'ready_consent' => 'راهنمای تأیید رضایت',
+            'upload_tip' => 'نکتهٔ کوتاه عکس مناسب',
+            'progress_hint' => 'راهنمای انتظار نتیجه',
+            'delayed_message' => 'پیام طولانی‌شدن پردازش',
+            'result_loading' => 'پیام دریافت فایل ساخته‌شده',
+            'result_load_error' => 'خطای دریافت فایل نتیجه',
+            'progress_paused' => 'پیام توقف پیگیری خودکار',
         );
     }
 }

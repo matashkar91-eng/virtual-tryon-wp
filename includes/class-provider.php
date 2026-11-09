@@ -59,18 +59,28 @@ final class Provider {
         if (!Settings::valid_quality($quality)) {
             return self::error('vto_provider_quality', 'کیفیت ساخت تصویر معتبر نیست؛ تنظیمات فروشگاه را بررسی کنید.', 'Image edit quality must be one of low, medium, high or auto.');
         }
+        if (isset($job['product_id']) && (!is_string($job['product_id']) || !preg_match('/^(?:custom:[a-z0-9_-]{1,80}|wc:[1-9][0-9]*)$/D', $job['product_id']))) {
+            return self::error('vto_product_image', 'شناسهٔ طرح انتخاب‌شده معتبر نیست. لطفاً طرح دیگری انتخاب کنید.', 'Invalid snapshotted design identifier.');
+        }
         $product = self::product_image($job);
         if (is_wp_error($product)) {
             return $product;
         }
         $category = isset($job['category']) ? (string) $job['category'] : '';
-        $design = self::product_design($job, $product, $category);
+        // The stable snapshotted ID distinguishes a raw artwork from a worn
+        // WooCommerce photograph even after the catalog source changes.
+        $is_artwork = isset($job['product_id']) && preg_match('/^custom:[a-z0-9_-]{1,80}$/D', (string) $job['product_id']) === 1;
+        if ($is_artwork) {
+            $product = self::bounded_artwork($product);
+            if (is_wp_error($product)) { return $product; }
+        }
+        $design = $is_artwork ? array('image' => $product, 'board' => false) : self::product_design($job, $product, $category);
         // A site product photo may contain another model. Put the automatically
         // extracted fabric/detail board first so the provider sees the product
         // consistently across existing gallery photos, then keep the original
         // store photo only as drape/context.
         $product_design = $design['image'];
-        $has_product_context = !hash_equals(hash('sha256', $product_design['bytes']), hash('sha256', $product['bytes']));
+        $has_product_context = !$is_artwork && !hash_equals(hash('sha256', $product_design['bytes']), hash('sha256', $product['bytes']));
         $prompt = isset($job['prompt']) ? (string) $job['prompt'] : (string) $settings['prompt'];
         $prompt = strtr($prompt, array(
             '{product}' => isset($job['product_name']) ? (string) $job['product_name'] : '',
@@ -78,7 +88,7 @@ final class Provider {
         ));
         // Establish non-negotiable image roles and replacement requirements even
         // when a merchant supplies a short or ambiguous custom prompt.
-        $prompt = self::replacement_instructions($category, $has_product_context, $design['board']) . "\n\nMerchant instructions:\n" . $prompt;
+        $prompt = self::replacement_instructions($category, $has_product_context, $design['board'], $is_artwork) . "\n\nMerchant instructions:\n" . $prompt;
         $boundary = 'vto-' . bin2hex(random_bytes(18));
         $body = self::field($boundary, 'model', $model)
             . self::field($boundary, 'prompt', substr($prompt, 0, 12000))
@@ -123,11 +133,15 @@ final class Provider {
         return self::with_transport_diagnostics(Provider_Result::decode($response, $job), $transport);
     }
 
-    private static function replacement_instructions(string $category, bool $has_context, bool $has_design_board): string {
+    private static function replacement_instructions(string $category, bool $has_context, bool $has_design_board, bool $is_artwork): string {
         $base = "Create ONE NEWLY RENDERED photorealistic portrait from the supplied references. This must be a newly generated portrait, not a copy or minimal recolor of Image 1. "
             . "REFERENCE ROLES — DO NOT SWAP THEM: Image 1 = CUSTOMER and the ONLY identity allowed in the result; use it as the identity reference, not as pixels to return unchanged. Image 2 = exact PRODUCT DESIGN "
-            . ($has_design_board ? "board automatically composed from detail crops of the selected product's existing store-gallery photos" : "automatically derived from the selected store product photo")
+            . ($is_artwork ? "RAW FLAT SCARF ARTWORK uploaded by the store administrator, supplied in full without cropping; use its whole print, border, corners and color layout as the exact scarf design"
+                : ($has_design_board ? "board automatically composed from detail crops of the selected product's existing store-gallery photos" : "automatically derived from the selected store product photo"))
             . "; it is not an identity reference. ";
+        if ($is_artwork) {
+            $base .= "There are exactly TWO reference images. Image 2 is flat textile artwork, not a worn scarf photograph or a person. Map that artwork onto a newly draped scarf covering the customer's head, neck and shoulders, preserving the design's borders and motifs through realistic folds. Do not paste a flat square over the portrait or return the artwork alone. ";
+        }
         if ($has_context) {
             $base .= "Image 3 = the original full STORE PRODUCT PHOTO for drape and scale only. It may contain another model: ignore that person's face, identity, body, clothing, pose and background completely. ";
         }
@@ -145,6 +159,44 @@ final class Provider {
             'jewelry' => "For jewelry, replace the matching existing accessory and make the exact reference piece clearly visible in its natural wearing position. Preserve the face, skin and all unrelated accessories.",
         );
         return $base . (isset($specific[$category]) ? $specific[$category] : $specific['clothing']);
+    }
+
+    /**
+     * Keep the complete artwork, including corners and borders. Limiting only
+     * oversized references bounds input cost without creating an extra image.
+     * Normal artwork up to the legacy workflow's 1280px size stays untouched.
+     */
+    private static function bounded_artwork(array $image) {
+        $info = @getimagesizefromstring($image['bytes']);
+        if (!$info || max($info[0], $info[1]) <= 1280) { return $image; }
+        $source = null; $canvas = null; $buffer_level = ob_get_level();
+        try {
+            if (!function_exists('imagecreatefromstring') || !function_exists('imagecopyresampled')) {
+                throw new \RuntimeException('Artwork resizing is unavailable.');
+            }
+            $source = @imagecreatefromstring($image['bytes']);
+            if (!$source) { throw new \RuntimeException('Artwork could not be decoded.'); }
+            $scale = 1280 / max($info[0], $info[1]);
+            $width = max(1, (int) round($info[0] * $scale));
+            $height = max(1, (int) round($info[1] * $scale));
+            $canvas = imagecreatetruecolor($width, $height);
+            if (!$canvas) { throw new \RuntimeException('Artwork could not be allocated.'); }
+            $white = imagecolorallocate($canvas, 255, 255, 255);
+            imagefill($canvas, 0, 0, $white);
+            if (!imagecopyresampled($canvas, $source, 0, 0, 0, 0, $width, $height, $info[0], $info[1])) {
+                throw new \RuntimeException('Artwork could not be resized.');
+            }
+            ob_start(); $encoded = imagejpeg($canvas, null, 92); $bytes = ob_get_clean();
+            if (!$encoded || !is_string($bytes)) { throw new \RuntimeException('Artwork could not be encoded.'); }
+            $validated = self::validate_image($bytes);
+            if (!is_wp_error($validated)) { return $validated; }
+        } catch (\Throwable $ignored) {
+            while (ob_get_level() > $buffer_level) { @ob_end_clean(); }
+        } finally {
+            if ($source) { imagedestroy($source); }
+            if ($canvas) { imagedestroy($canvas); }
+        }
+        return self::error('vto_product_image', 'آماده‌سازی طرح خام بزرگ انجام نشد. تصویر را با ضلع بزرگ حداکثر ۱۲۸۰ پیکسل بارگذاری کنید.', 'Oversized artwork could not be safely reduced before generation. No generation was submitted.');
     }
 
     /**

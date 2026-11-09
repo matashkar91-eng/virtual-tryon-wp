@@ -120,11 +120,11 @@ PHP
 require getenv('VTO_DEV_DIR').'/wordpress/wp-load.php';
 VTO\Jobs::install();
 if(get_option('vto_dev_seed_pending')){
-    $im=imagecreatetruecolor(600,700);imagefill($im,0,0,imagecolorallocate($im,240,229,220));imagefilledpolygon($im,[70,150,530,150,480,570,300,630,120,570],imagecolorallocate($im,108,60,129));ob_start();imagepng($im);$png=ob_get_clean();imagedestroy($im);
+    $im=imagecreatetruecolor(600,600);imagefill($im,0,0,imagecolorallocate($im,108,60,129));$gold=imagecolorallocate($im,235,202,139);$cream=imagecolorallocate($im,247,236,217);imagesetthickness($im,14);imagerectangle($im,18,18,581,581,$gold);imagesetthickness($im,3);imagerectangle($im,42,42,557,557,$cream);for($y=100;$y<550;$y+=100){for($x=100;$x<550;$x+=100){imagefilledellipse($im,$x,$y,24,42,$cream);imagefilledellipse($im,$x-17,$y+12,30,15,$gold);}}ob_start();imagepng($im);$png=ob_get_clean();imagedestroy($im);
     $up=wp_upload_bits('scarf-demo.png',null,$png);if(!empty($up['error'])){fwrite(STDERR,$up['error']);exit(1);}
     $aid=wp_insert_attachment(['post_title'=>'روسری بنفش','post_status'=>'inherit','post_mime_type'=>'image/png'],$up['file']);update_attached_file($aid,$up['file']);
     $p=new WC_Product_Simple();$p->set_name('روسری طرح بنفشه');$p->set_status('publish');$p->set_regular_price(250000);$p->set_image_id($aid);$pid=$p->save();
-    $s=VTO\Settings::defaults();$s['product_ids']=[$pid];update_option('vto_settings',$s,false);
+    $s=VTO\Settings::defaults();$s['product_ids']=[$pid];$s['catalog_source']='designs';$s['manual_products']=[['id'=>'demo-floral','name'=>'طرح باغ بنفشه','image_id'=>$aid,'active'=>true]];update_option('vto_settings',$s,false);
     $page=wp_insert_post(['post_title'=>'اتاق پرو مجازی','post_name'=>'virtual-tryon','post_content'=>'[virtual_tryon]','post_status'=>'publish','post_type'=>'page']);update_option('show_on_front','page');update_option('page_on_front',$page);delete_option('vto_dev_seed_pending');
 }
 echo 'Prepared WordPress '.get_bloginfo('version').' / WooCommerce '.WC_VERSION.' / PHP '.PHP_VERSION.PHP_EOL;
@@ -132,6 +132,7 @@ PHP
 # Unit/provider mocks never call a paid provider. Tests restore storefront settings.
 VTO_WP_ROOT="$vto_wp" "$vto_php" "$vto_plugin_dir/tests/integration.php"
 VTO_WP_ROOT="$vto_wp" "$vto_php" "$vto_plugin_dir/tests/provider-results.php"
+VTO_WP_ROOT="$vto_wp" "$vto_php" "$vto_plugin_dir/tests/raw-designs.php"
 vto_port="$("$vto_php" -r '$u=parse_url(getenv("VTO_DEV_URL"));echo $u["port"] ?? 80;')"
 echo "Start: $vto_php -S 127.0.0.1:$vto_port -t $vto_wp"
 echo "HTTP checks: VTO_WP_ROOT=$vto_wp VTO_PHP=$vto_php python3 $vto_plugin_dir/tests/http-smoke.py"

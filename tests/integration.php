@@ -43,6 +43,8 @@ $exit_code = 0;
 try {
     wp_set_current_user(1);
     $settings = VTO\Settings::defaults();
+    check($settings['catalog_source'] === 'designs', 'Standalone raw artwork library is the default catalog source');
+    $settings['catalog_source'] = 'woocommerce';
     $settings['mode'] = 'demo';
     $settings['rate_limit'] = 2;
     $settings['global_rate_limit'] = 1000;

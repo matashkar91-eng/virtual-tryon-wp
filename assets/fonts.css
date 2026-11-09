@@ -1,0 +1,8 @@
+/* Vazirmatn by Saber Rastikerdar. SIL Open Font License in fonts/OFL.txt. */
+@font-face {
+    font-family: 'Vazirmatn';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('fonts/Vazirmatn.woff2') format('woff2');
+}

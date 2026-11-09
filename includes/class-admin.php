@@ -16,6 +16,7 @@ final class Admin {
     public static function menu() {
         add_menu_page('پرو مجازی', 'پرو مجازی', 'manage_options', 'vto-settings', array(__CLASS__, 'settings_page'), 'dashicons-format-image', 57);
         add_submenu_page('vto-settings', 'تنظیمات پرو مجازی', 'تنظیمات', 'manage_options', 'vto-settings', array(__CLASS__, 'settings_page'));
+        add_submenu_page('vto-settings', 'گالری طرح‌های روسری', 'طرح‌های روسری', 'manage_options', 'vto-designs', array(__CLASS__, 'designs_page'));
         add_submenu_page('vto-settings', 'درخواست‌های پرو مجازی', 'درخواست‌ها و تصاویر', 'manage_options', 'vto-jobs', array(__CLASS__, 'jobs_page'));
     }
 
@@ -23,8 +24,9 @@ final class Admin {
         if (strpos($hook, 'vto-') === false) {
             return;
         }
-        wp_enqueue_style('vto-admin', plugins_url('../assets/admin.css', __FILE__), array(), VTO_VERSION);
-        if (strpos($hook, 'vto-settings') !== false) {
+        wp_enqueue_style('vto-font', plugins_url('../assets/fonts.css', __FILE__), array(), VTO_VERSION);
+        wp_enqueue_style('vto-admin', plugins_url('../assets/admin.css', __FILE__), array('vto-font'), VTO_VERSION);
+        if (strpos($hook, 'vto-settings') !== false || strpos($hook, 'vto-designs') !== false) {
             wp_enqueue_media();
         }
     }
@@ -71,23 +73,168 @@ final class Admin {
         echo '</span><button type="button" class="button vto-pick-image">انتخاب تصویر</button> <button type="button" class="button-link-delete vto-clear-image">حذف</button></div>';
     }
 
+    /** A standalone gallery of flat scarf artwork, using WordPress media. */
+    public static function designs_page() {
+        self::authorize();
+        $s = Settings::get();
+        $designs = array_values((array) $s['manual_products']);
+        $active = count(array_filter($designs, static function ($design) { return !array_key_exists('active', $design) || !empty($design['active']); }));
+        ?>
+        <div class="wrap vto-admin vto-design-admin" dir="rtl">
+            <div class="vto-admin-header"><div><span class="vto-kicker">SCARF DESIGN STUDIO</span><h1>گالری طرح‌های روسری</h1><p>طرح خام را اضافه کنید؛ مشتری آن را انتخاب می‌کند و روی عکس خودش می‌بیند.</p></div><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=vto-settings')); ?>">تنظیمات پرو مجازی ←</a></div>
+            <?php settings_errors(); ?>
+            <section class="vto-design-intro"><div><span class="vto-design-intro-icon" aria-hidden="true">✦</span><h2>از طرح پارچه تا پرو روی عکس مشتری</h2><p>عکس گرافیکی یا اسکنِ بازشدهٔ هر روسری را ثبت کنید. طرح و حاشیه‌ها واضح و کامل باشند و عکس، چهره یا بدن مدل نداشته باشد. همان تصویر کامل برای ساخت پرو فرستاده می‌شود.</p><div class="vto-design-chips"><span>بدون نیاز به ووکامرس</span><span>بدون عکس مدل فروشگاه</span><span>اقتصادی · کیفیت low</span><span>۱۰۲۴ × ۱۰۲۴ · یک خروجی</span></div></div><ol class="vto-design-onboarding"><li><b>۱</b><span><strong>طرح خام را بارگذاری کنید</strong><small>JPG، PNG یا WebP؛ ترجیحاً مربع و واضح</small></span></li><li><b>۲</b><span><strong>نام بدهید و فعال کنید</strong><small>همین نام در صفحهٔ انتخاب مشتری دیده می‌شود</small></span></li><li><b>۳</b><span><strong>گالری را ذخیره کنید</strong><small>طرح‌های فعال در صفحهٔ پرو نمایش داده می‌شوند</small></span></li></ol></section>
+            <form action="options.php" method="post" id="vto-design-form">
+                <?php settings_fields('vto_settings_group'); ?>
+                <input type="hidden" name="vto_settings[catalog_source]" value="designs">
+                <input type="hidden" name="vto_settings[garment_type]" value="scarf">
+                <input type="hidden" name="vto_settings[quality]" value="low">
+                <input type="hidden" name="vto_settings[manual_products_present]" value="1">
+                <input type="hidden" name="vto_settings[manual_products]" value="">
+                <div class="vto-design-toolbar"><div><h2>طرح‌های شما <span data-vto-design-count><?php echo esc_html(number_format_i18n(count($designs))); ?></span></h2><p><span data-vto-active-count><?php echo esc_html(number_format_i18n($active)); ?></span> طرح فعال برای انتخاب مشتری</p></div><button type="button" class="button button-primary vto-add-designs"><span class="dashicons dashicons-plus-alt2" aria-hidden="true"></span> افزودن طرح خام</button></div>
+                <div class="vto-design-empty" data-vto-design-empty <?php if ($designs) { echo 'hidden'; } ?>><span aria-hidden="true">▧</span><h3>اولین طرح روسری را اضافه کنید</h3><p>می‌توانید چند تصویر را یک‌جا از رسانه‌های وردپرس انتخاب یا از دستگاه بارگذاری کنید.</p><button class="button button-secondary vto-add-designs" type="button">انتخاب و بارگذاری طرح‌ها</button></div>
+                <div class="vto-design-grid" id="vto-design-rows">
+                    <?php foreach ($designs as $index => $design) { self::design_card($index, $design); } ?>
+                </div>
+                <p class="vto-design-feedback" role="status" aria-live="polite" data-vto-design-feedback></p>
+                <div class="vto-design-save"><div><strong>نمایش گالری مستقل در صفحهٔ پرو</strong><p>با ذخیره، کاربر فقط طرح‌های فعال همین گالری را می‌بیند. ساخت روی حالت اقتصادی قرار می‌گیرد؛ کلید API و مدل ذخیره‌شده حفظ می‌شوند.</p></div><?php submit_button('ذخیره و نمایش طرح‌ها', 'primary', 'submit', false); ?></div>
+            </form>
+            <p class="vto-design-cost-note">پس از ذخیره: <strong>کیفیت اقتصادی (low)، یک خروجی ۱۰۲۴ پیکسلی</strong> · <a href="<?php echo esc_url(admin_url('admin.php?page=vto-settings#vto-provider')); ?>">تنظیمات ساخت و هزینه</a>. افزودن یا ذخیرهٔ طرح، تصویر هوش مصنوعی تولید نمی‌کند و اعتبار مصرف نمی‌کند.</p>
+            <script type="text/template" id="vto-design-template"><?php self::design_card('__INDEX__', array('id' => '', 'name' => '', 'image_id' => 0, 'active' => true)); ?></script>
+        </div>
+        <script>
+        (function () {
+            'use strict';
+            var rows = document.getElementById('vto-design-rows');
+            var form = document.getElementById('vto-design-form');
+            var next = <?php echo (int) count($designs); ?>;
+            var feedback = document.querySelector('[data-vto-design-feedback]');
+            var number = new Intl.NumberFormat('fa-IR');
+            var dirty = false;
+            function changed() {
+                dirty = true;
+                var cards = rows.querySelectorAll('[data-vto-design-card]');
+                rows.querySelectorAll('[data-vto-design-name]').forEach(function (name) { name.setCustomValidity(''); });
+                document.querySelector('[data-vto-design-count]').textContent = number.format(cards.length);
+                document.querySelector('[data-vto-active-count]').textContent = number.format(rows.querySelectorAll('[data-vto-active]:checked').length);
+                document.querySelector('[data-vto-design-empty]').hidden = cards.length > 0;
+                feedback.textContent = 'تغییرات هنوز ذخیره نشده‌اند؛ «ذخیره و نمایش طرح‌ها» را بزنید.';
+            }
+            function selected(card, attachment) {
+                card.querySelector('[data-vto-image-id]').value = attachment.id;
+                var stableId = card.querySelector('[data-vto-design-id]');
+                if (!stableId.value) { stableId.value = 'item-' + attachment.id; }
+                var preview = card.querySelector('[data-vto-design-preview]');
+                preview.textContent = '';
+                var image = document.createElement('img');
+                image.src = attachment.sizes && attachment.sizes.medium ? attachment.sizes.medium.url : attachment.url;
+                image.alt = '';
+                preview.appendChild(image);
+                card.querySelector('[data-vto-design-pick-label]').textContent = 'تغییر تصویر طرح';
+            }
+            function add(attachment) {
+                var duplicate = Array.from(rows.querySelectorAll('[data-vto-image-id]')).some(function (input) { return String(input.value) === String(attachment.id); });
+                if (duplicate) { return 'duplicate'; }
+                if (rows.children.length >= 100) { return 'limit'; }
+                rows.insertAdjacentHTML('beforeend', document.getElementById('vto-design-template').innerHTML.replace(/__INDEX__/g, String(next++)));
+                var card = rows.lastElementChild;
+                selected(card, attachment);
+                card.querySelector('[data-vto-design-name]').value = attachment.title || 'طرح روسری';
+                return 'added';
+            }
+            document.querySelectorAll('.vto-add-designs').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    var frame = wp.media({title: 'عکس خام طرح‌های روسری را انتخاب کنید', button: {text: 'افزودن به گالری طرح‌ها'}, library: {type: ['image/jpeg', 'image/png', 'image/webp']}, multiple: true});
+                    frame.on('select', function () {
+                        var added = 0, duplicates = 0, capped = false;
+                        frame.state().get('selection').each(function (attachment) {
+                            var outcome = add(attachment.toJSON());
+                            if (outcome === 'added') { added++; }
+                            if (outcome === 'duplicate') { duplicates++; }
+                            if (outcome === 'limit') { capped = true; }
+                        });
+                        if (added) { changed(); }
+                        if (duplicates) { feedback.textContent = (added ? number.format(added) + ' طرح اضافه شد؛ ' : '') + number.format(duplicates) + ' تصویر از قبل در گالری وجود داشت و تکراری اضافه نشد.' + (added ? ' تغییرات را ذخیره کنید.' : ''); }
+                        if (capped) { feedback.textContent = 'در هر گالری حداکثر ۱۰۰ طرح قابل ذخیره است.'; }
+                        var first = rows.lastElementChild;
+                        if (first) { first.querySelector('[data-vto-design-name]').focus(); }
+                    });
+                    frame.open();
+                });
+            });
+            rows.addEventListener('click', function (event) {
+                var picker = event.target.closest('[data-vto-design-pick]');
+                if (picker) {
+                    var card = picker.closest('[data-vto-design-card]');
+                    var frame = wp.media({title: 'انتخاب عکس خام روسری', button: {text: 'استفاده از همین طرح'}, library: {type: ['image/jpeg', 'image/png', 'image/webp']}, multiple: false});
+                    frame.on('select', function () {
+                        var attachment = frame.state().get('selection').first().toJSON();
+                        var duplicate = Array.from(rows.querySelectorAll('[data-vto-design-card]')).some(function (other) { return other !== card && String(other.querySelector('[data-vto-image-id]').value) === String(attachment.id); });
+                        if (duplicate) { feedback.textContent = 'این تصویر قبلاً در یکی از طرح‌های گالری ثبت شده است؛ تصویر دیگری انتخاب کنید.'; return; }
+                        selected(card, attachment); changed();
+                    });
+                    frame.open();
+                }
+                var remove = event.target.closest('[data-vto-design-remove]');
+                if (remove) {
+                    remove.closest('[data-vto-design-card]').remove();
+                    changed();
+                }
+            });
+            rows.addEventListener('input', changed);
+            rows.addEventListener('change', changed);
+            form.addEventListener('submit', function (event) {
+                var invalid = false;
+                rows.querySelectorAll('[data-vto-design-card]').forEach(function (card) {
+                    var name = card.querySelector('[data-vto-design-name]');
+                    var hasImage = Number(card.querySelector('[data-vto-image-id]').value) > 0;
+                    var valid = Boolean(name.value.trim()) && hasImage;
+                    name.setCustomValidity(valid ? '' : 'نام و عکس خام این طرح را کامل کنید.');
+                    if (!valid && !invalid) { invalid = true; name.reportValidity(); }
+                });
+                if (invalid) { event.preventDefault(); feedback.textContent = 'برای هر طرح، نام و تصویر لازم است.'; return; }
+                dirty = false;
+            });
+            window.addEventListener('beforeunload', function (event) {
+                if (!dirty) { return; }
+                event.preventDefault(); event.returnValue = '';
+            });
+        }());
+        </script>
+        <?php
+    }
+
+    private static function design_card($index, array $design): void {
+        $prefix = 'vto_settings[manual_products][' . $index . ']';
+        $image_id = absint($design['image_id'] ?? 0);
+        $active = !array_key_exists('active', $design) || !empty($design['active']);
+        ?>
+        <article class="vto-design-card" data-vto-design-card>
+            <input type="hidden" name="<?php echo esc_attr($prefix); ?>[id]" value="<?php echo esc_attr($design['id'] ?? ''); ?>" data-vto-design-id>
+            <input type="hidden" name="<?php echo esc_attr($prefix); ?>[image_id]" value="<?php echo $image_id; ?>" data-vto-image-id>
+            <button class="vto-design-image" type="button" data-vto-design-pick aria-label="انتخاب یا تغییر عکس خام طرح"><span data-vto-design-preview><?php if ($image_id) { echo wp_get_attachment_image($image_id, 'medium', false, array('alt' => '')); } else { echo '<span class="vto-design-image-placeholder" aria-hidden="true">＋</span>'; } ?></span><span class="vto-design-image-action" data-vto-design-pick-label><?php echo $image_id ? 'تغییر تصویر طرح' : 'انتخاب تصویر طرح'; ?></span></button>
+            <div class="vto-design-card-body"><label for="vto-design-name-<?php echo esc_attr($index); ?>">نام طرح برای مشتری</label><input id="vto-design-name-<?php echo esc_attr($index); ?>" name="<?php echo esc_attr($prefix); ?>[name]" value="<?php echo esc_attr($design['name'] ?? ''); ?>" type="text" maxlength="120" placeholder="مثلاً: روسری باغ ایرانی، زرشکی" required data-vto-design-name><div class="vto-design-card-footer"><label class="vto-design-active"><input type="hidden" name="<?php echo esc_attr($prefix); ?>[active]" value="0"><input type="checkbox" name="<?php echo esc_attr($prefix); ?>[active]" value="1" <?php checked($active); ?> data-vto-active><span>نمایش به مشتری</span></label><button class="button-link-delete" type="button" data-vto-design-remove>حذف طرح</button></div></div>
+        </article>
+        <?php
+    }
+
     public static function settings_page() {
         self::authorize();
         $s = Settings::get();
         ?>
         <div class="wrap vto-admin" dir="rtl">
-            <div class="vto-admin-header"><div><span class="vto-kicker">VIRTUAL TRY-ON</span><h1>اتاق پروی فروشگاه شما</h1><p>یک افزونه، با ظاهر و محصولات مخصوص فروشگاه شما.</p></div><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=vto-jobs')); ?>">درخواست‌ها و تصاویر ←</a></div>
+            <div class="vto-admin-header"><div><span class="vto-kicker">VIRTUAL TRY-ON</span><h1>اتاق پروی فروشگاه شما</h1><p>گالری طرح‌های روسری، ظاهر صفحه و تنظیمات ساخت تصویر را مدیریت کنید.</p></div><a class="button" href="<?php echo esc_url(admin_url('admin.php?page=vto-jobs')); ?>">درخواست‌ها و تصاویر ←</a></div>
             <?php settings_errors(); ?>
             <?php self::connection_notice(); ?>
             <?php if (class_exists('VTO\\Storage')) : $storage = Storage::directory(); if (is_wp_error($storage)) : ?><div class="notice notice-error"><p><strong>فضای خصوصی تصاویر آماده نیست:</strong> <?php echo esc_html($storage->get_error_message()); ?> مسیر قابل‌نوشتن خارج از ریشهٔ عمومی سایت را با ثابت <code>VTO_PRIVATE_DIR</code> در <code>wp-config.php</code> تعیین کنید. فایل عکس مشتری نباید مستقیم از وب قابل دریافت باشد.</p></div><?php endif; endif; ?>
             <?php if (!extension_loaded('gd') && !extension_loaded('imagick')) : ?><div class="notice notice-warning"><p>برای پردازش امن تصویر، افزونهٔ PHP GD یا Imagick را روی میزبان فعال کنید.</p></div><?php endif; ?>
-            <div class="vto-guide"><strong>شروع سریع</strong><span>۱. محصول‌ها را فعال کنید.</span><span>۲. یک برگه بسازید و کد <code>[virtual_tryon]</code> را در آن بگذارید.</span><span>۳. ابتدا در حالت آزمایشی بررسی کنید، سپس API را فعال کنید.</span></div>
-            <nav class="vto-nav" aria-label="بخش‌های تنظیمات"><a href="#vto-appearance">ظاهر و متن‌ها</a><a href="#vto-products">محصول‌ها</a><a href="#vto-provider">هوش مصنوعی</a><a href="#vto-privacy">دسترسی و نگهداری</a></nav>
+            <div class="vto-guide"><strong>شروع سریع</strong><span>۱. عکس خام طرح‌ها را در گالری ثبت کنید.</span><span>۲. یک برگه بسازید و کد <code>[virtual_tryon]</code> را در آن بگذارید.</span><span>۳. ابتدا در حالت آزمایشی بررسی کنید، سپس API را فعال کنید.</span></div>
+            <nav class="vto-nav" aria-label="بخش‌های تنظیمات"><a href="<?php echo esc_url(admin_url('admin.php?page=vto-designs')); ?>">گالری طرح‌های روسری ↗</a><a href="#vto-appearance">ظاهر و متن‌ها</a><a href="#vto-products">محصول‌ها</a><a href="#vto-provider">هوش مصنوعی</a><a href="#vto-privacy">دسترسی و نگهداری</a></nav>
             <form action="options.php" method="post">
                 <?php settings_fields('vto_settings_group'); ?>
                 <section class="vto-card" id="vto-appearance"><h2>ظاهر و متن‌های صفحه</h2><p class="description">این تنظیمات فقط صفحهٔ پرو را تغییر می‌دهند و به قالب سایت وابسته نیستند.</p>
                     <table class="form-table" role="presentation"><tbody>
-                    <?php foreach (array('title' => 'عنوان اصلی', 'subtitle' => 'توضیح زیر عنوان', 'product_label' => 'عنوان انتخاب محصول', 'upload_label' => 'عنوان بارگذاری عکس', 'button_label' => 'متن دکمهٔ ساخت', 'success_message' => 'پیام آماده‌شدن نتیجه', 'consent_text' => 'متن رضایت ارسال عکس') as $key => $label) : ?>
+                    <?php foreach (array('title' => 'عنوان اصلی', 'subtitle' => 'توضیح زیر عنوان', 'product_label' => 'عنوان انتخاب طرح', 'upload_label' => 'عنوان بارگذاری عکس', 'button_label' => 'متن دکمهٔ ساخت', 'success_message' => 'پیام آماده‌شدن نتیجه', 'consent_text' => 'متن رضایت ارسال عکس') as $key => $label) : ?>
                         <tr><th scope="row"><label for="vto-<?php echo esc_attr($key); ?>"><?php echo esc_html($label); ?></label></th><td><?php if (in_array($key, array('subtitle', 'consent_text'), true)) { self::textarea($s, $key); } else { self::input($s, $key); } ?></td></tr>
                     <?php endforeach; ?>
                     <?php foreach (array('accent_color' => 'رنگ اصلی و دکمه‌ها', 'bg_color' => 'رنگ پس‌زمینه', 'text_color' => 'رنگ نوشته‌ها') as $key => $label) : ?>
@@ -103,23 +250,13 @@ final class Admin {
                     </tbody></table></details>
                 </section>
 
-                <section class="vto-card" id="vto-products"><h2>محصول‌های قابل پرو</h2><p>فقط محصول‌هایی که اینجا انتخاب می‌کنید برای مشتری نمایش داده می‌شوند. افزونه از عکس شاخص و حداکثر دو عکس موجود در گالری همان محصول استفاده می‌کند و برای روسری یک نمای جزئیات واحد می‌سازد؛ تصویر مرجع جداگانه لازم نیست. عکس‌هایی که طرح و حاشیه را واضح نشان دهند نتیجهٔ بهتری می‌دهند.</p>
-                    <table class="form-table" role="presentation"><tbody>
-                        <tr><th scope="row"><label for="vto-garment_type">گروه فروشگاه</label></th><td><?php self::select($s, 'garment_type', array('scarf' => 'روسری و شال', 'clothing' => 'پوشاک', 'glasses' => 'عینک', 'jewelry' => 'زیورآلات')); ?><p class="description">انتخاب گروه جایگزین آزمایش کیفیت مدل برای محصولات شما نیست.</p></td></tr>
-                        <tr><th scope="row"><label for="vto-product_ids">شناسه‌های محصول ووکامرس</label></th><td><input class="large-text" dir="ltr" id="vto-product_ids" name="vto_settings[product_ids]" value="<?php echo esc_attr(implode(', ', $s['product_ids'])); ?>" placeholder="123, 456, 789"><p class="description">شناسه‌ها را با ویرگول جدا کنید. شناسهٔ هر محصول در فهرست محصولات ووکامرس مشخص است. فهرست خالی یعنی هیچ محصول ووکامرسی فعال نیست.</p>
-                        <?php if (!function_exists('wc_get_product')) : ?><p class="vto-warning">ووکامرس فعال نیست؛ می‌توانید فعلاً از فهرست مستقل زیر استفاده کنید.</p><?php else : ?>
-                            <p><label for="vto-product-search">جست‌وجو در تمام محصولات ووکامرس</label><br><input class="regular-text" type="search" id="vto-product-search" placeholder="نام، شناسه یا SKU؛ دست‌کم دو نویسه" autocomplete="off"><span id="vto-product-search-status" role="status" aria-live="polite"></span></p><div class="vto-product-helper" id="vto-product-search-results"></div>
-                            <details><summary>انتخاب سریع از ۴۰ محصول اخیر</summary><div class="vto-product-helper"><?php
-                            foreach (wc_get_products(array('status' => 'publish', 'limit' => 40, 'orderby' => 'date', 'order' => 'DESC')) as $product) {
-                                printf('<button type="button" class="button vto-add-product" data-id="%d">%s <code>#%d</code></button> ', absint($product->get_id()), esc_html($product->get_name()), absint($product->get_id()));
-                            }
-                            ?></div><p class="description">روی محصول بزنید تا شناسه‌اش اضافه شود؛ برای حذف، شناسه را از کادر بالا پاک کنید. این راهنما فقط محصولات اخیر را نشان می‌دهد؛ جست‌وجو و کادر شناسه محدود به این فهرست نیستند.</p></details>
-                        <?php endif; ?></td></tr>
-                    </tbody></table>
-                    <details><summary>فهرست مستقل محصولات؛ بدون وابستگی به ووکامرس</summary><p class="description">برای هر محصول نام و تصویر انتخاب کنید. ردیف بدون نام یا تصویر ذخیره نمی‌شود. شناسهٔ ثابت را پس از انتشار تغییر ندهید.</p>
-                    <table class="widefat vto-manual-table"><thead><tr><th>شناسهٔ ثابت</th><th>نام محصول</th><th>تصویر</th><th>حذف</th></tr></thead><tbody id="vto-manual-rows">
-                        <?php foreach ($s['manual_products'] as $index => $product) { self::manual_row($index, $product); } ?>
-                    </tbody></table><p><button type="button" class="button" id="vto-add-manual">+ افزودن محصول مستقل</button></p></details>
+                <section class="vto-card" id="vto-products"><h2>طرح‌های قابل پرو</h2><div class="vto-catalog-callout"><span class="dashicons dashicons-art" aria-hidden="true"></span><div><h3>عکس خام روسری، مستقیم به پرو مجازی</h3><p>طرح‌ها را در گالری مستقل ثبت کنید؛ کاربر همان طرح‌ها را می‌بیند و برای انتخاب آن‌ها به محصول ووکامرس نیازی نیست.</p><a class="button button-primary" href="<?php echo esc_url(admin_url('admin.php?page=vto-designs')); ?>">مدیریت طرح‌های روسری ←</a></div></div>
+                    <details><summary>تنظیمات پیشرفتهٔ فهرست و اتصال اختیاری ووکامرس</summary><table class="form-table" role="presentation"><tbody>
+                        <tr><th scope="row"><label for="vto-catalog_source">منبع انتخاب‌ها</label></th><td><?php self::select($s, 'catalog_source', array('designs' => 'گالری طرح‌های خام؛ مستقل از ووکامرس', 'woocommerce' => 'محصول‌های ووکامرس؛ روش قبلی')); ?><p class="description">در روش گالری، فقط طرح‌های فعال نمایش داده می‌شوند. ذخیرهٔ صفحهٔ گالری این روش را فعال می‌کند.</p></td></tr>
+                        <tr><th scope="row"><label for="vto-garment_type">گروه فروشگاه</label></th><td><?php self::select($s, 'garment_type', array('scarf' => 'روسری و شال', 'clothing' => 'پوشاک', 'glasses' => 'عینک', 'jewelry' => 'زیورآلات')); ?></td></tr>
+                        <tr><th scope="row"><label for="vto-product_ids">شناسه‌های ووکامرس؛ اختیاری</label></th><td><input class="large-text" dir="ltr" id="vto-product_ids" name="vto_settings[product_ids]" value="<?php echo esc_attr(implode(', ', $s['product_ids'])); ?>" placeholder="123, 456, 789"><p class="description">این فهرست فقط با انتخاب روش ووکامرس استفاده می‌شود؛ روی گالری طرح‌های خام اثری ندارد.</p>
+                        <?php if (function_exists('wc_get_product')) : ?><p><label for="vto-product-search">جست‌وجوی محصول ووکامرس</label><br><input class="regular-text" type="search" id="vto-product-search" placeholder="نام، شناسه یا SKU؛ دست‌کم دو نویسه" autocomplete="off"><span id="vto-product-search-status" role="status" aria-live="polite"></span></p><div class="vto-product-helper" id="vto-product-search-results"></div><?php endif; ?></td></tr>
+                    </tbody></table></details>
                 </section>
 
                 <section class="vto-card" id="vto-provider"><h2>اتصال به اول‌ای‌آی (AvalAI)</h2><p class="vto-warning">مسیر ویرایش چندتصویری با شناسهٔ پیش‌فرض <code>gpt-image-2.5-flare</code> در حساب این فروشگاه سابقهٔ اجرای موفق دارد. این نتیجه دسترسی، کیفیت یا هزینهٔ حساب و مدل فعلی شما را تضمین نمی‌کند؛ پیش از عرضهٔ عمومی، یک درخواست کنترل‌شده در حساب خود اجرا و مصرف آن را بررسی کنید.</p><p><a href="#vto-connection-test">بررسی اتصال و دسترسی مدل بدون ارسال عکس ↓</a></p><table class="form-table" role="presentation"><tbody>
@@ -131,7 +268,7 @@ final class Admin {
                 </tbody></table></section>
 
                 <section class="vto-card" id="vto-privacy"><h2>دسترسی، محدودیت و نگهداری</h2><table class="form-table" role="presentation"><tbody>
-                    <tr><th scope="row">ورود به حساب</th><td><label><input type="checkbox" name="vto_settings[require_login]" value="1" <?php checked($s['require_login']); ?>> فقط کاربران واردشده بتوانند تصویر بسازند</label><p class="description">با خاموش‌بودن این گزینه، مهمان‌ها هم می‌توانند با محدودیت درخواست استفاده کنند.</p></td></tr>
+                    <tr><th scope="row">ورود به حساب</th><td><label><input type="hidden" name="vto_settings[require_login]" value="0"><input type="checkbox" name="vto_settings[require_login]" value="1" <?php checked($s['require_login']); ?>> فقط کاربران واردشده بتوانند تصویر بسازند</label><p class="description">با خاموش‌بودن این گزینه، مهمان‌ها هم می‌توانند با محدودیت درخواست استفاده کنند.</p></td></tr>
                     <tr><th scope="row"><label for="vto-max_upload_mb">حداکثر حجم عکس (مگابایت)</label></th><td><?php self::input($s, 'max_upload_mb', 'number', 'min="1" max="12"'); ?><p class="description">حد PHP و وب‌سرور هم اعمال می‌شود؛ افزایش این عدد به‌تنهایی محدودیت سرور را تغییر نمی‌دهد.</p></td></tr>
                     <tr><th scope="row"><label for="vto-rate_limit">حد درخواست هر کاربر در ساعت</label></th><td><?php self::input($s, 'rate_limit', 'number', 'min="1" max="50"'); ?><p class="description">برای مهمان‌ها محدودیت بر اساس نشانی شبکه اعمال می‌شود؛ کاربران یک شبکه ممکن است این سهمیه را مشترک داشته باشند.</p></td></tr>
                     <tr><th scope="row"><label for="vto-global_rate_limit">سقف کل درخواست‌های فروشگاه در ساعت</label></th><td><?php self::input($s, 'global_rate_limit', 'number', 'min="1" max="1000"'); ?><p class="description">این سقف به کنترل مصرف اعتبار کمک می‌کند. جایگزین سقف هزینه در حساب سرویس‌دهنده نیست.</p></td></tr>
@@ -148,12 +285,10 @@ final class Admin {
                 <p class="description">موفقیت این بررسی فقط ارتباط، احراز هویت و دسترسی به فهرست مدل‌ها را نشان می‌دهد؛ پشتیبانی از ویرایش چند عکس، اعتبار کافی و کیفیت پرو را تأیید نمی‌کند. برای تکرار بررسی دست‌کم ۱۵ ثانیه صبر کنید.</p>
                 <p class="description">پس از ذخیرهٔ حالت واقعی، اگر صفحهٔ پرو هنوز برچسب آزمایشی دارد، کش <strong>همان برگهٔ پرو</strong> را در افزونه‌هایی مانند WP Rocket پاک و صفحه را تازه کنید. لینک یک درخواست قدیمی همچنان نتیجه و تنظیمات زمان ثبت خودش را نشان می‌دهد.</p>
             </section>
-            <script type="text/template" id="vto-manual-template"><?php self::manual_row('__INDEX__', array('id' => '', 'name' => '', 'image_id' => 0, 'category' => 'auto')); ?></script>
         </div>
         <script>
         (function(){
             'use strict';
-            var next = <?php echo count($s['manual_products']); ?>;
             var productSearch = document.getElementById('vto-product-search');
             if (productSearch) {
                 var searchTimer;
@@ -211,12 +346,6 @@ final class Admin {
                     media.querySelector('input[type=hidden]').value = 0;
                     media.querySelector('.vto-media-preview').textContent = '';
                 }
-                var add = event.target.closest('#vto-add-manual');
-                if (add) {
-                    document.getElementById('vto-manual-rows').insertAdjacentHTML('beforeend',document.getElementById('vto-manual-template').innerHTML.replace(/__INDEX__/g,String(next++)));
-                }
-                var remove = event.target.closest('.vto-remove-row');
-                if (remove) { remove.closest('tr').remove(); }
                 var product = event.target.closest('.vto-add-product');
                 if (product) {
                     var input = document.getElementById('vto-product_ids');
@@ -227,13 +356,6 @@ final class Admin {
             });
         }());
         </script>
-        <?php
-    }
-
-    private static function manual_row($index, $product) {
-        $prefix = 'vto_settings[manual_products][' . $index . ']';
-        ?>
-        <tr><td><input type="text" dir="ltr" name="<?php echo esc_attr($prefix); ?>[id]" value="<?php echo esc_attr($product['id']); ?>" placeholder="scarf-01" aria-label="شناسهٔ ثابت"></td><td><input type="text" name="<?php echo esc_attr($prefix); ?>[name]" value="<?php echo esc_attr($product['name']); ?>" aria-label="نام محصول"><input type="hidden" name="<?php echo esc_attr($prefix); ?>[category]" value="<?php echo esc_attr(isset($product['category']) ? $product['category'] : 'auto'); ?>"></td><td><div class="vto-media"><input type="hidden" name="<?php echo esc_attr($prefix); ?>[image_id]" value="<?php echo absint($product['image_id']); ?>"><span class="vto-media-preview"><?php if ($product['image_id']) { echo wp_get_attachment_image($product['image_id'], 'thumbnail'); } ?></span><button type="button" class="button vto-pick-image">انتخاب تصویر</button></div></td><td><button type="button" class="button-link-delete vto-remove-row">حذف ردیف</button></td></tr>
         <?php
     }
 
@@ -373,7 +495,7 @@ final class Admin {
             <?php foreach ($jobs as $job) : $job = (array) $job; $id = absint($job['id']); $status = isset($job['status']) ? $job['status'] : ''; $uncertain_billing = self::uncertain_billing_outcome($job); ?>
                 <tr><td><strong>#<?php echo $id; ?></strong><br><?php echo esc_html(isset($job['product_name']) ? $job['product_name'] : ''); ?></td><td><span class="vto-status vto-status-<?php echo esc_attr(sanitize_html_class($status)); ?>"><?php echo esc_html(isset($status_names[$status]) ? $status_names[$status] : $status); ?></span><br><time dir="ltr"><?php echo esc_html(isset($job['created_at']) ? $job['created_at'] : ''); ?> UTC</time><br><small>تعداد تلاش: <?php echo absint(isset($job['attempts']) ? $job['attempts'] : 0); ?></small></td><td>
                 <?php $product_image_url = wp_get_attachment_image_url(absint(isset($job['product_image_id']) ? $job['product_image_id'] : 0), 'full'); if ($product_image_url) : ?>
-                    <a class="vto-job-image" target="_blank" rel="noopener noreferrer" href="<?php echo esc_url($product_image_url); ?>"><img loading="lazy" src="<?php echo esc_url($product_image_url); ?>" alt="تصویر محصول انتخابی"><span>محصول انتخابی</span></a>
+                    <a class="vto-job-image" target="_blank" rel="noopener noreferrer" href="<?php echo esc_url($product_image_url); ?>"><img loading="lazy" src="<?php echo esc_url($product_image_url); ?>" alt="تصویر محصول انتخابی"><span>تصویر انتخابی</span></a>
                 <?php endif; ?>
                 <?php foreach (array('input' => 'عکس ورودی', 'output' => 'تصویر خروجی') as $kind => $label) : if (empty($job[$kind . '_path'])) { continue; } $image_url = add_query_arg(array('kind' => $kind, '_wpnonce' => wp_create_nonce('wp_rest')), rest_url('vto/v1/admin/jobs/' . $id . '/image')); ?>
                     <a class="vto-job-image" target="_blank" rel="noopener noreferrer" href="<?php echo esc_url($image_url); ?>"><img loading="lazy" src="<?php echo esc_url($image_url); ?>" alt="<?php echo esc_attr($label); ?>"><span><?php echo esc_html($label); ?></span></a>
@@ -384,7 +506,7 @@ final class Admin {
                     <?php if ($uncertain_billing) : ?><p class="description"><strong>هشدار هزینه:</strong> قطع ارتباط یا پاسخ ناقص ثابت نمی‌کند ساخت انجام نشده است. پیش از «ساخت دوباره»، تاریخچه و مصرف همین درخواست را در AvalAI بررسی کنید؛ اصلاح زمان انتظار نتیجهٔ قبلی را بازیابی نمی‌کند.</p><?php endif; ?>
                     <?php if (!empty($job['error_detail'])) : ?><details><summary>جزئیات فنی خطا برای مدیر</summary><pre class="vto-diagnostic" dir="auto"><?php echo esc_html($job['error_detail']); ?></pre></details><?php endif; ?>
                     <?php if (!empty($job['provider_request_id'])) : ?><br><small>شناسهٔ سرویس: <code dir="ltr"><?php echo esc_html($job['provider_request_id']); ?></code></small><?php endif; ?>
-                    <details><summary>تنظیمات هنگام ثبت درخواست</summary><dl class="vto-job-snapshot"><dt>حالت اجرا</dt><dd><?php echo isset($job['mode']) && $job['mode'] === 'avalai' ? 'واقعی؛ AvalAI' : 'آزمایشی؛ بدون ساخت تصویر واقعی'; ?></dd><dt>مدل</dt><dd><code dir="ltr"><?php echo esc_html(isset($job['model']) ? $job['model'] : ''); ?></code></dd><dt>کیفیت و هزینه</dt><dd><?php echo esc_html(self::quality_label(isset($job['quality']) ? $job['quality'] : 'legacy')); ?></dd><dt>پرامپت فروشگاه هنگام ثبت</dt><dd><pre class="vto-diagnostic" dir="auto"><?php echo esc_html(isset($job['prompt']) ? $job['prompt'] : ''); ?></pre></dd></dl><p class="description">افزونه پیش از این متن، عکس مشتری را فقط مرجع هویت معرفی می‌کند، از عکس شاخص و گالری همان محصول یک نمای جزئیات می‌سازد و تولید یک پرترهٔ تازه با جایگزینی کامل محصول را می‌خواهد. تلاش دوباره از همان حالت، مدل و پرامپت ثبت‌شده استفاده می‌کند. کیفیت درخواست‌های جدید حفظ می‌شود؛ درخواست قدیمیِ بدون ثبت کیفیت با حالت اقتصادی تکرار می‌شود. برای آزمایش تنظیمات تازه، یک درخواست جدید بسازید.</p></details>
+                    <details><summary>تنظیمات هنگام ثبت درخواست</summary><dl class="vto-job-snapshot"><dt>حالت اجرا</dt><dd><?php echo isset($job['mode']) && $job['mode'] === 'avalai' ? 'واقعی؛ AvalAI' : 'آزمایشی؛ بدون ساخت تصویر واقعی'; ?></dd><dt>مدل</dt><dd><code dir="ltr"><?php echo esc_html(isset($job['model']) ? $job['model'] : ''); ?></code></dd><dt>کیفیت و هزینه</dt><dd><?php echo esc_html(self::quality_label(isset($job['quality']) ? $job['quality'] : 'legacy')); ?></dd><dt>پرامپت فروشگاه هنگام ثبت</dt><dd><pre class="vto-diagnostic" dir="auto"><?php echo esc_html(isset($job['prompt']) ? $job['prompt'] : ''); ?></pre></dd></dl><p class="description"><?php echo str_starts_with((string) ($job['product_id'] ?? ''), 'custom:') ? 'در این درخواست، تصویر کامل طرح خام بدون برش همراه با عکس مشتری ارسال می‌شود؛ مدل باید روسری فعلی را با همین طرح جایگزین کند.' : 'در این درخواست، افزونه از عکس شاخص و گالری محصول ووکامرس یک نمای جزئیات می‌سازد و جایگزینی کامل محصول را می‌خواهد.'; ?> تلاش دوباره از همان حالت، مدل و پرامپت ثبت‌شده استفاده می‌کند. کیفیت درخواست‌های جدید حفظ می‌شود؛ درخواست قدیمیِ بدون ثبت کیفیت با حالت اقتصادی تکرار می‌شود. برای آزمایش تنظیمات تازه، یک درخواست جدید بسازید.</p></details>
                     </td><td><?php if ($status === 'queued') { self::job_button($id, 'run', 'اجرای همین درخواست اکنون', isset($job['mode']) && 'avalai' === $job['mode']); } if ($status === 'failed' && !empty($job['reference_path'])) { $direct_url = add_query_arg('_wpnonce', wp_create_nonce('wp_rest'), rest_url('vto/v1/admin/jobs/' . $id . '/provider-image')); ?><a class="button button-primary button-small" target="_blank" rel="noopener noreferrer" href="<?php echo esc_url($direct_url); ?>">۱. بازکردن خروجی موجود</a><?php self::job_button($id, 'recover', 'تلاش دانلود توسط هاست (بدون ساخت جدید)'); ?><details class="vto-result-import"><summary>هاست دانلود نمی‌کند؟ فایل بازشده را اینجا ذخیره کنید</summary><p class="description">خروجی را با دکمهٔ بالا باز و روی دستگاه ذخیره کنید، سپس همان فایل را انتخاب کنید. افزونه آن را با عکس ورودی مقایسه و در فضای خصوصی سایت ثبت می‌کند. این کار درخواست ساخت تازه‌ای نمی‌فرستد و اعتبار AvalAI مصرف نمی‌کند.</p><form action="<?php echo esc_url(admin_url('admin-post.php')); ?>" method="post" enctype="multipart/form-data" class="vto-job-action"><input type="hidden" name="action" value="vto_job_action"><input type="hidden" name="job_id" value="<?php echo absint($id); ?>"><input type="hidden" name="job_action" value="import"><?php wp_nonce_field('vto_job_import_' . $id); ?><label><span class="screen-reader-text">انتخاب فایل خروجی</span><input type="file" name="result_image" accept="image/jpeg,image/png,image/webp" required></label><button class="button button-small" type="submit">۲. ثبت همین فایل روی سایت</button></form></details><?php } if ($status === 'failed' && empty($job['reference_path'])) { self::job_button($id, 'retry', 'ساخت دوبارهٔ تصویر (احتمال مصرف اعتبار)', isset($job['mode']) && 'avalai' === $job['mode']); } self::job_button($id, 'delete', 'حذف عکس‌ها و درخواست'); ?></td></tr>
             <?php endforeach; ?>
             </tbody></table></div><p class="description">برای تازه‌کردن وضعیت، صفحه را بازخوانی کنید. زمان‌ها بر حسب UTC هستند. خطاهای سرویس به شکل پاک‌سازی‌شده نمایش داده می‌شوند؛ کلید API و محتوای حساس پاسخ ذخیره نمی‌شود.</p>

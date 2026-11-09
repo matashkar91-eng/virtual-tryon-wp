@@ -4,24 +4,27 @@ Tags: virtual try on, woocommerce, avalai, fashion
 Requires at least: 6.5
 Tested up to: 7.0
 Requires PHP: 8.1
-Stable tag: 0.3.1
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Configurable Persian RTL fitting room, explicit product allowlist,
-private images, durable jobs and private result links.
+Persian RTL scarf fitting room with an independent raw-design gallery,
+local Vazirmatn typography, private photos and private result links.
 
 == Installation ==
-Upload the plugin ZIP, activate, open the پرو مجازی menu, select products,
-and place [virtual_tryon] on a page. Start in demo mode.
+Upload the plugin ZIP, activate, and open پرو مجازی > طرح‌های روسری.
+Add a complete flat scarf artwork image, a name, and enable it. Save the gallery
+to use independent designs and economical quality. WooCommerce is not required.
+Place [virtual_tryon] on a page. Start in demo mode.
 See README.md for private storage, cron, privacy and deployment requirements.
 
 == External services ==
-When AvalAI mode is enabled, a customer's photo, product images already stored
-in WooCommerce and the prompt are sent server-side to
-https://api.avalai.ir/v1/images/edits using the store's API key. Up to three
-product photos may be processed locally into one bounded design board; the
-provider request still sends at most one design board and one full product photo.
+When AvalAI mode is enabled, a customer's photo, the selected full raw scarf
+artwork and the prompt are sent server-side to
+https://api.avalai.ir/v1/images/edits using the store's API key. The default
+independent-design path sends exactly two images, without cropping the artwork.
+Optional WooCommerce mode can process up to three product photos locally into
+one design board and send it with a full product-context photo.
 No images are sent to AvalAI in demo mode. An explicit administrator connection
 check sends the saved API key to GET https://api.avalai.ir/v1/models, including
 when demo is selected. It retrieves model availability without generating images.
@@ -32,6 +35,15 @@ quality and billing can still differ by model, account and provider policy.
 Demo returns the original photo and does not change garments or accessories.
 
 == Upgrade Notice ==
+= 0.4.0 =
+The default catalog is now an independent raw scarf-design gallery. Upload and
+name designs in the new administrator page; WooCommerce products are optional.
+Saving the gallery selects raw designs and low quality while retaining the API
+key and model. Raw designs are sent whole as the second of two references.
+The customer flow and gallery management use local Vazirmatn typography and
+responsive, accessible selection and upload controls. No live generation runs
+during upgrade or design upload. Exact provider price is not guaranteed.
+
 = 0.3.1 =
 Use the featured image and up to two existing WooCommerce gallery photos to
 build one scarf-design detail board without requiring a separate upload. Ask
@@ -87,6 +99,17 @@ timeout workaround if you added it in Code Snippets. Existing failed jobs are no
 resubmitted. Check AvalAI history before manually rebuilding an uncertain job.
 
 == Changelog ==
+= 0.4.0 =
+Add a dedicated administrator raw-artwork gallery with image selection, names,
+active toggles and previews. Separate the default design catalog from optional
+WooCommerce products, and preserve omitted settings across the two forms.
+Send the complete raw artwork without cropping, in a two-image edit request
+with explicit identity and print roles, low quality, one 1024x1024 output and
+no complexity override. Redesign customer selection, photo upload, readiness
+feedback and result presentation. Bundle Vazirmatn under the SIL Open Font
+License with no third-party font request. Retain validated private output and
+non-billable result recovery safeguards from 0.3.1.
+
 = 0.3.1 =
 Build a single bounded product-design board from detail crops of the featured
 image and up to two existing WooCommerce gallery photos, while keeping the

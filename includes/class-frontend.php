@@ -12,10 +12,10 @@ final class Frontend {
     public static function labels() {
         return array(
             'eyebrow' => 'اتاق پرو مجازی',
-            'step_product' => 'انتخاب محصول',
+            'step_product' => 'انتخاب طرح',
             'step_upload' => 'عکس شما',
             'step_result' => 'نتیجهٔ پرو',
-            'photo_hint' => 'یک عکس واضح با نور مناسب و پس‌زمینهٔ ساده انتخاب کنید. چهره و محل قرار گرفتن محصول در کادر باشند.',
+            'photo_hint' => 'عکس روبه‌رو با نور طبیعی انتخاب کنید؛ صورت، سر و شانه‌ها کامل در کادر باشند.',
             'choose_photo' => 'انتخاب عکس',
             'replace_photo' => 'تغییر عکس',
             'remove_photo' => 'حذف عکس',
@@ -27,27 +27,27 @@ final class Frontend {
             'download_label' => 'دریافت تصویر',
             'new_request' => 'یک پروی دیگر',
             'waiting_label' => 'تصویر شما در حال آماده‌شدن است',
-            'empty_products' => 'به‌زودی محصولات قابل پرو در این بخش قرار می‌گیرند.',
+            'empty_products' => 'گالری طرح‌های روسری به‌زودی آماده می‌شود. کمی بعد دوباره سر بزنید.',
             'privacy_notice' => 'لینک عکس و نتیجه تا {hours} ساعت در دسترس است. پس از انقضا، فایل‌های خصوصی در اجرای بعدی پاک‌سازی خودکار حذف می‌شوند.',
             'login_notice' => 'برای استفاده از اتاق پرو، ابتدا وارد حساب کاربری خود شوید.',
             'login_label' => 'ورود به حساب',
             'demo_notice' => 'حالت آزمایشی فعال است؛ این خروجی فقط جریان کار را نمایش می‌دهد و پروی واقعی با هوش مصنوعی نیست.',
             'result_label' => 'این شما، این انتخاب تازه‌تان',
             'selected_label' => 'انتخاب‌شده',
-            'product_count' => 'محصول قابل پرو',
+            'product_count' => 'طرح برای انتخاب',
             'footer_note' => 'پرو مجازی، تصویری تقریبی می‌سازد و تضمین اندازه یا تن‌خور محصول نیست.',
             'upload_limit' => 'JPG، PNG یا WebP · حداکثر {mb} مگابایت',
             'error_file_type' => 'لطفاً یک تصویر JPG، PNG یا WebP انتخاب کنید.',
             'error_file_size' => 'حجم عکس بیشتر از حد مجاز است. یک تصویر کوچک‌تر انتخاب کنید.',
             'error_file_read' => 'خواندن این عکس ممکن نیست. تصویر دیگری انتخاب کنید.',
-            'error_product' => 'ابتدا یک محصول انتخاب کنید.',
+            'error_product' => 'اول طرح دلخواهتان را از گالری انتخاب کنید.',
             'error_photo' => 'ابتدا عکس خود را انتخاب کنید.',
             'error_consent' => 'برای ارسال عکس، موافقت با پردازش آن لازم است.',
             'error_network' => 'ارتباط برقرار نشد. اتصال اینترنت را بررسی کنید و دوباره تلاش کنید.',
             'error_unknown' => 'این درخواست انجام نشد. دوباره تلاش کنید یا با پشتیبانی فروشگاه تماس بگیرید.',
             'error_expired' => 'این لینک منقضی شده یا درخواست در دسترس نیست. می‌توانید یک پروی تازه بسازید.',
-            'queued_message' => 'درخواست ثبت شد و در صف پردازش قرار دارد.',
-            'processing_message' => 'در حال ساخت تصویر هستیم. این مرحله ممکن است چند دقیقه طول بکشد.',
+            'queued_message' => 'درخواست ثبت شده و منتظر شروع پردازش است. نیازی به ارسال دوباره نیست.',
+            'processing_message' => 'طرح انتخابی شما در حال پرو شدن است. نتیجه با همین لینک در دسترس خواهد بود.',
             'connection_message' => 'ارتباط موقتاً قطع شده است. لینک پیگیری محفوظ است و دوباره وضعیت را بررسی می‌کنیم.',
             'submitting_message' => 'در حال ارسال امن عکس…',
             'retry_status' => 'بررسی دوبارهٔ وضعیت',
@@ -56,6 +56,19 @@ final class Frontend {
             'expires_label' => 'زمان پایان دسترسی:',
             'failed_label' => 'تصویر آماده نشد',
             'javascript_notice' => 'برای استفاده از اتاق پرو، جاوااسکریپت مرورگر را فعال کنید.',
+            'gallery_hint' => 'رنگ‌ها و جزئیات هر طرح را ببینید و یکی را انتخاب کنید.',
+            'search_designs' => 'جست‌وجوی نام طرح…',
+            'search_empty' => 'طرحی با این نام پیدا نشد.',
+            'selection_placeholder' => 'هنوز طرحی انتخاب نکرده‌اید',
+            'selection_heading' => 'انتخاب شما',
+            'ready_message' => 'همه‌چیز برای ساخت تصویر آماده است.',
+            'ready_consent' => 'برای شروع، اجازهٔ پردازش عکس را تأیید کنید.',
+            'upload_tip' => 'صورت کامل · سر و شانه‌ها · نور مناسب',
+            'progress_hint' => 'می‌توانید صفحه را ببندید؛ لینک خصوصی زیر را نگه دارید.',
+            'delayed_message' => 'هنوز پاسخ نهایی دریافت نشده است. برای جلوگیری از درخواست تکراری، همین وضعیت را پیگیری کنید.',
+            'result_loading' => 'تصویر ساخته شده است؛ در حال دریافت فایل…',
+            'result_load_error' => 'دریافت فایل تصویر کامل نشد. «بررسی دوبارهٔ وضعیت» را بزنید؛ این کار تصویر تازه‌ای نمی‌سازد.',
+            'progress_paused' => 'پاسخ نهایی هنوز آماده نیست؛ بعداً با همین لینک وضعیت را بررسی کنید.',
         );
     }
 
@@ -67,7 +80,8 @@ final class Frontend {
         $hours = (int) $settings['retention_hours'];
         $labels['privacy_notice'] = str_replace('{hours}', (string) $hours, $labels['privacy_notice']);
         $labels['upload_limit'] = str_replace('{mb}', (string) $settings['max_upload_mb'], $labels['upload_limit']);
-        wp_enqueue_style('vto-storefront', VTO_URL . 'assets/frontend.css', array(), VTO_VERSION);
+        wp_enqueue_style('vto-font', VTO_URL . 'assets/fonts.css', array(), VTO_VERSION);
+        wp_enqueue_style('vto-storefront', VTO_URL . 'assets/frontend.css', array('vto-font'), VTO_VERSION);
         wp_enqueue_script('vto-storefront', VTO_URL . 'assets/frontend.js', array(), VTO_VERSION, true);
         $config = array(
             'restUrl' => esc_url_raw(rest_url('vto/v1/')),
@@ -91,7 +105,7 @@ final class Frontend {
         $banner = $settings['banner_id'] ? wp_get_attachment_image_url((int) $settings['banner_id'], 'large') : '';
         ob_start();
         ?>
-        <section id="<?php echo esc_attr($id); ?>" class="vto alignwide" dir="rtl" style="<?php echo esc_attr(implode(';', $colors)); ?>" data-vto-app aria-labelledby="<?php echo esc_attr($id); ?>-title">
+        <section id="<?php echo esc_attr($id); ?>" class="vto vto-app alignwide" dir="rtl" style="<?php echo esc_attr(implode(';', $colors)); ?>" data-vto-app aria-labelledby="<?php echo esc_attr($id); ?>-title">
             <header class="vto-hero<?php echo $banner ? ' vto-hero--with-image' : ''; ?>">
                 <?php if ($banner) : ?><img class="vto-hero-image" src="<?php echo esc_url($banner); ?>" alt="" loading="lazy" referrerpolicy="no-referrer"><?php endif; ?>
                 <div class="vto-hero-content">
@@ -114,18 +128,22 @@ final class Frontend {
                     <div class="vto-workspace">
                         <fieldset class="vto-products" data-vto-products>
                             <legend class="vto-section-title"><span><?php echo esc_html($settings['product_label']); ?></span><small><?php echo esc_html(number_format_i18n(count($products)) . ' ' . $labels['product_count']); ?></small></legend>
+                            <p class="vto-gallery-hint"><?php echo esc_html($labels['gallery_hint']); ?></p>
+                            <?php if (count($products) >= 9) : ?><label class="vto-search"><span aria-hidden="true">⌕</span><input type="search" data-vto-search placeholder="<?php echo esc_attr($labels['search_designs']); ?>" aria-label="<?php echo esc_attr($labels['search_designs']); ?>"></label><?php endif; ?>
                             <?php if (!$products) : ?><div class="vto-empty"><?php echo esc_html($labels['empty_products']); ?></div><?php endif; ?>
                             <div class="vto-product-grid">
                             <?php foreach ($products as $product) : ?>
-                                <label class="vto-product">
-                                    <input type="radio" name="product_id" value="<?php echo esc_attr($product['id']); ?>" required>
+                                <label class="vto-product" data-vto-design>
+                                    <input type="radio" name="product_id" value="<?php echo esc_attr($product['id']); ?>" data-vto-name="<?php echo esc_attr($product['name']); ?>" data-vto-image="<?php echo esc_url($product['image']); ?>" required>
                                     <span class="vto-product-visual"><?php if (!empty($product['image'])) : ?><img src="<?php echo esc_url($product['image']); ?>" alt="" loading="lazy" referrerpolicy="no-referrer"><?php else : ?><span class="vto-product-placeholder" aria-hidden="true">◇</span><?php endif; ?><span class="vto-product-check" aria-hidden="true">✓</span></span>
-                                    <span class="vto-product-name"><?php echo esc_html($product['name']); ?></span>
+                                    <span class="vto-product-name"><?php echo esc_html($product['name']); ?></span><span class="vto-selected-label"><?php echo esc_html($labels['selected_label']); ?></span>
                                 </label>
                             <?php endforeach; ?>
                             </div>
+                            <p class="vto-search-empty" data-vto-search-empty hidden><?php echo esc_html($labels['search_empty']); ?></p>
                         </fieldset>
                         <div class="vto-photo-panel">
+                            <div class="vto-selection" data-vto-selection><span class="vto-selection-icon" aria-hidden="true">◇</span><img data-vto-selection-image alt="" hidden><div><small><?php echo esc_html($labels['selection_heading']); ?></small><strong data-vto-selection-name><?php echo esc_html($labels['selection_placeholder']); ?></strong></div><span class="vto-selection-tick" aria-hidden="true" hidden>✓</span></div>
                             <label class="vto-section-title" for="<?php echo esc_attr($id); ?>-photo"><?php echo esc_html($settings['upload_label']); ?></label>
                             <div class="vto-upload" data-vto-dropzone>
                                 <div class="vto-upload-placeholder" data-vto-placeholder><span class="vto-upload-icon" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><rect x="8" y="8" width="32" height="32" rx="10" stroke="currentColor" stroke-width="1.5"/><circle cx="24" cy="20" r="5" stroke="currentColor" stroke-width="1.5"/><path d="M14 36c1-7 6-10 10-10s9 3 10 10M36 6v8M32 10h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span><strong><?php echo esc_html($labels['choose_photo']); ?></strong><small><?php echo esc_html($labels['upload_limit']); ?></small></div>
@@ -134,9 +152,10 @@ final class Frontend {
                                 <label class="vto-upload-hitarea" for="<?php echo esc_attr($id); ?>-photo"><span class="vto-sr-only"><?php echo esc_html($labels['choose_photo']); ?></span></label>
                             </div>
                             <div class="vto-photo-actions" data-vto-photo-actions hidden><label for="<?php echo esc_attr($id); ?>-photo" class="vto-text-button"><?php echo esc_html($labels['replace_photo']); ?></label><button type="button" class="vto-text-button" data-vto-remove><?php echo esc_html($labels['remove_photo']); ?></button></div>
-                            <p id="<?php echo esc_attr($id); ?>-hint" class="vto-hint"><?php echo esc_html($labels['photo_hint']); ?></p>
+                            <p id="<?php echo esc_attr($id); ?>-hint" class="vto-hint"><?php echo esc_html($labels['photo_hint']); ?></p><p class="vto-upload-tip"><span aria-hidden="true">✓</span> <?php echo esc_html($labels['upload_tip']); ?></p>
                             <div class="vto-consent"><label><input type="checkbox" name="consent" value="1" required><span><?php echo esc_html($settings['consent_text']); ?></span></label><small><?php echo esc_html($labels['consent_hint']); ?></small></div>
-                            <button type="submit" class="vto-button vto-submit" data-vto-submit <?php disabled(empty($products)); ?>><span><?php echo esc_html($settings['button_label']); ?></span><span aria-hidden="true">←</span></button>
+                            <p class="vto-readiness" id="<?php echo esc_attr($id); ?>-readiness" data-vto-readiness aria-live="polite"><?php echo esc_html($labels['error_product']); ?></p>
+                            <button type="submit" class="vto-button vto-submit" data-vto-submit aria-describedby="<?php echo esc_attr($id); ?>-readiness" disabled><span><?php echo esc_html($settings['button_label']); ?></span><span aria-hidden="true">←</span></button>
                             <p class="vto-privacy"><?php echo esc_html($labels['privacy_notice']); ?></p>
                         </div>
                     </div>
@@ -147,6 +166,8 @@ final class Frontend {
                         <div class="vto-progress-visual" data-vto-spinner aria-hidden="true"><span class="vto-progress-ring"></span><span>✦</span></div>
                         <h3 id="<?php echo esc_attr($id); ?>-job-title" data-vto-job-title><?php echo esc_html($labels['waiting_label']); ?></h3>
                         <p data-vto-job-message aria-live="polite"></p>
+                        <p class="vto-progress-hint" data-vto-progress-hint><?php echo esc_html($labels['progress_hint']); ?></p>
+                        <div class="vto-job-selection" data-vto-job-selection hidden><img data-vto-job-design alt=""><div><small><?php echo esc_html($labels['selection_heading']); ?></small><strong data-vto-job-design-name></strong></div></div>
                         <img class="vto-result-image" data-vto-result alt="<?php echo esc_attr($labels['result_alt']); ?>" referrerpolicy="no-referrer" hidden>
                         <p class="vto-result-note" data-vto-result-note hidden><?php echo esc_html($labels['footer_note']); ?></p>
                         <p class="vto-expiry" data-vto-expiry hidden></p>

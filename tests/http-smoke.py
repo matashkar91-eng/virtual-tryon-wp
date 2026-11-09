@@ -30,7 +30,7 @@ $im=imagecreatetruecolor(128,128);imagefill($im,0,0,imagecolorallocate($im,100,8
 $up=wp_upload_bits('vto-http-fixture.png',null,$png);
 $aid=wp_insert_attachment(['post_title'=>'VTO HTTP fixture','post_status'=>'inherit','post_mime_type'=>'image/png'],$up['file']);update_attached_file($aid,$up['file']);
 $p=new WC_Product_Simple();$p->set_name('روسری تست HTTP');$p->set_status('publish');$p->set_regular_price(100);$p->set_image_id($aid);$pid=$p->save();
-$next=VTO\\Settings::defaults();$next['mode']='demo';$next['product_ids']=[$pid];$next['rate_limit']=50;$next['global_rate_limit']=1000;update_option('vto_settings',$next,false);
+$next=VTO\\Settings::defaults();$next['mode']='demo';$next['catalog_source']='woocommerce';$next['product_ids']=[$pid];$next['rate_limit']=50;$next['global_rate_limit']=1000;update_option('vto_settings',$next,false);
 VTO\\Jobs::install();
 $manager=WP_Session_Tokens::get_instance(1);$exp=time()+3600;$token=$manager->create($exp);$cookie=wp_generate_auth_cookie(1,$exp,'logged_in',$token);wp_set_current_user(1);
 echo wp_json_encode(['old_settings'=>$s,'product_id'=>$pid,'attachment_id'=>$aid,'image'=>base64_encode($png),'base'=>home_url('/'),'admin_cookie'=>LOGGED_IN_COOKIE.'='.$cookie,'session_token'=>$token,'admin_nonce'=>wp_create_nonce('wp_rest')]);

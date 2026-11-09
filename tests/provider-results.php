@@ -30,6 +30,7 @@ $filter = null;
 try {
     wp_set_current_user(1);
     $settings = VTO\Settings::defaults();
+    $settings['catalog_source']='woocommerce';
     $settings['mode']='avalai';
     $settings['api_key']='provider-result-test-not-a-real-key';
     $settings['global_rate_limit']=1000;

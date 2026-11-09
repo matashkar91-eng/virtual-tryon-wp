@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Virtual Try-On Studio
- * Description: پرو مجازی قابل تنظیم برای فروشگاه‌های ووکامرس، با صف پردازش، پیگیری خصوصی و اتصال به AvalAI.
- * Version: 0.3.1
+ * Description: پرو مجازی روسری با گالری مستقل طرح‌های خام، پیگیری خصوصی و اتصال اقتصادی به AvalAI.
+ * Version: 0.4.0
  * Requires at least: 6.5
  * Requires PHP: 8.1
  * Author: Virtual Try-On Studio
@@ -10,7 +10,7 @@
  * License: GPL-2.0-or-later
  */
 defined('ABSPATH') || exit;
-define('VTO_VERSION', '0.3.1');
+define('VTO_VERSION', '0.4.0');
 define('VTO_DIR', plugin_dir_path(__FILE__));
 define('VTO_URL', plugin_dir_url(__FILE__));
 foreach (['settings', 'catalog', 'storage', 'provider-result', 'provider', 'jobs', 'rest', 'frontend', 'admin'] as $vto_file) {
